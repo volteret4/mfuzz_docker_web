@@ -533,7 +533,134 @@
                 top: 10px;
                 max-width: calc(100vw - 20px);
             }
+
+            /* Album details */
+            .album-details {
+                display: none;
+                color: #fff;
+            }
+
+            .album-image-large {
+                width: 250px;
+                height: 250px;
+                border-radius: 12px;
+                object-fit: cover;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            }
+
+            .album-image-large-placeholder {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #2a2a3a;
+                color: #666;
+                font-size: 4em;
+                width: 250px;
+                height: 250px;
+                border-radius: 12px;
+            }
+
+            .tracklist {
+                background: #0f0f17;
+                border-radius: 12px;
+                padding: 16px;
+                border: 1px solid #2a2a3a;
+            }
+
+            .track-item:hover .track-number {
+                background: #cba6f7 !important;
+                color: #14141e !important;
+            }
+
+            /* Song details */
+            .song-details {
+                display: none;
+                color: #fff;
+            }
+
+            .song-links {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+
+            .service-link:hover {
+                border-color: currentColor !important;
+                background: #1f1f2e !important;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(203, 166, 247, 0.2);
+            }
+
+            .lyrics-content {
+                font-family: 'Georgia', serif;
+            }
+
+            .lyrics-content::-webkit-scrollbar {
+                width: 8px;
+            }
+
+            .lyrics-content::-webkit-scrollbar-track {
+                background: #1a1a24;
+                border-radius: 4px;
+            }
+
+            .lyrics-content::-webkit-scrollbar-thumb {
+                background: #2a2a3a;
+                border-radius: 4px;
+            }
+
+            .lyrics-content::-webkit-scrollbar-thumb:hover {
+                background: #cba6f7;
+            }
+
+            /* Back button styles */
+            .back-button:hover {
+                border-color: #cba6f7 !important;
+                background: rgba(203, 166, 247, 0.1) !important;
+            }
+
+            /* Technical info */
+            .technical-info div {
+                margin-bottom: 8px;
+                color: #ccc;
+            }
+
+            /* Responsive adjustments */
+            @media (max-width: 768px) {
+                .album-header > div {
+                    flex-direction: column !important;
+                    text-align: center;
+                }
+                
+                .album-image-large,
+                .album-image-large-placeholder {
+                    width: 200px;
+                    height: 200px;
+                    margin: 0 auto 20px auto;
+                }
+                
+                .track-item {
+                    padding: 12px !important;
+                }
+                
+                .track-info {
+                    margin-right: 8px;
+                }
+                
+                .service-link {
+                    font-size: 14px;
+                    padding: 8px 12px !important;
+                }
+                
+                .song-links {
+                    justify-content: center;
+                }
+            }
+
         }
+
+
+
 
         /* Animaciones suaves */
         .fade-in {
@@ -1449,6 +1576,354 @@
                 errorDiv.remove();
             }, 5000);
         }
+        async function selectAlbum(albumId) {
+            try {
+                const response = await fetch(`/api/album/${albumId}/details`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                displayAlbumDetails(data);
+                showTab('album');
+            } catch (error) {
+                console.error('Error obteniendo detalles del álbum:', error);
+                showError('Error cargando los detalles del álbum');
+            }
+        }
+
+        // Función para mostrar detalles del álbum
+        function displayAlbumDetails(data) {
+            const album = data.album;
+            const tracks = data.tracks;
+            
+            const albumDetails = document.getElementById('albumDetails');
+            if (!albumDetails) {
+                // Crear contenedor si no existe
+                const albumContainer = document.createElement('div');
+                albumContainer.id = 'albumDetails';
+                albumContainer.className = 'album-details';
+                albumContainer.style.display = 'none';
+                document.querySelector('.main-content').appendChild(albumContainer);
+            }
+            
+            // Crear HTML para imagen del álbum
+            const albumImageHtml = createImageElement(album.best_album_art, album.name, 'album-image-large', '💿');
+            
+            document.getElementById('albumDetails').innerHTML = `
+                <div class="album-header">
+                    <button class="back-button" onclick="goBackToArtist()" style="
+                        background: none; border: 1px solid #2a2a3a; color: #cba6f7; 
+                        padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-bottom: 20px;
+                        transition: all 0.2s ease;
+                    ">
+                        ← Volver al artista
+                    </button>
+                    
+                    <div style="display: flex; gap: 30px; margin-bottom: 30px; align-items: flex-start;">
+                        <div style="flex-shrink: 0;">
+                            ${albumImageHtml}
+                        </div>
+                        <div style="flex: 1;">
+                            <h2 class="album-title" style="font-size: 2.5em; margin-bottom: 10px; color: #cba6f7;">
+                                ${album.name}
+                            </h2>
+                            <h3 style="font-size: 1.5em; margin-bottom: 15px; color: #fff;">
+                                ${album.artist_name}
+                            </h3>
+                            <div class="album-meta" style="color: #888; margin-bottom: 20px; font-size: 16px;">
+                                ${album.year ? `📅 ${album.year}` : ''}
+                                ${album.genre ? ` • 🎭 ${album.genre}` : ''}
+                                ${album.label ? ` • 🏷️ ${album.label}` : ''}
+                                <br>
+                                🎵 ${tracks.length} canciones
+                                ${album.total_tracks && album.total_tracks !== tracks.length ? 
+                                ` (${album.total_tracks} total)` : ''}
+                            </div>
+                            
+                            <div class="album-actions" style="display: flex; gap: 12px; margin-top: 20px;">
+                                <button class="download-btn" onclick="downloadAlbum(${album.id}, '${album.name}', '${album.artist_name}')" 
+                                        id="download-btn-album-${album.id}">
+                                    📥 Descargar Álbum
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tracklist-section">
+                    <h3 style="color: #cba6f7; margin-bottom: 20px; font-size: 1.3em;">
+                        Tracklist
+                    </h3>
+                    <div class="tracklist">
+                        ${tracks.map((track, index) => `
+                            <div class="track-item" data-song-id="${track.id}" onclick="selectSong(${track.id})" style="
+                                background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 8px;
+                                padding: 16px; margin-bottom: 8px; cursor: pointer;
+                                transition: all 0.2s ease; display: flex; align-items: center; gap: 16px;
+                            ">
+                                <div class="track-number" style="
+                                    width: 30px; height: 30px; background: #2a2a3a; border-radius: 50%;
+                                    display: flex; align-items: center; justify-content: center;
+                                    color: #888; font-weight: bold; flex-shrink: 0;
+                                ">
+                                    ${track.track_number || index + 1}
+                                </div>
+                                
+                                <div class="track-info" style="flex: 1; min-width: 0;">
+                                    <div class="track-title" style="
+                                        font-weight: 600; color: #fff; font-size: 16px;
+                                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                                    ">
+                                        ${track.title}
+                                    </div>
+                                    <div class="track-meta" style="
+                                        font-size: 14px; color: #888; margin-top: 4px;
+                                    ">
+                                        ${track.duration ? formatDuration(track.duration) : ''}
+                                        ${track.genre && track.genre !== album.genre ? ` • ${track.genre}` : ''}
+                                    </div>
+                                </div>
+                                
+                                <div class="track-indicators" style="
+                                    display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+                                ">
+                                    ${track.has_lyrics ? '<span style="color: #cba6f7;" title="Tiene letras">📝</span>' : ''}
+                                    ${track.spotify_url ? '<span style="color: #1db954;" title="En Spotify">🎵</span>' : ''}
+                                    ${track.youtube_url ? '<span style="color: #ff0000;" title="En YouTube">▶️</span>' : ''}
+                                    ${track.bandcamp_url ? '<span style="color: #629aa0;" title="En Bandcamp">🎪</span>' : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            // Guardar datos del álbum para navegación
+            window.currentAlbumData = {
+                album: album,
+                tracks: tracks
+            };
+            
+            // Añadir event listeners para hover effects
+            document.querySelectorAll('.track-item').forEach(item => {
+                item.addEventListener('mouseenter', function() {
+                    this.style.borderColor = '#cba6f7';
+                    this.style.backgroundColor = '#1f1f2e';
+                });
+                
+                item.addEventListener('mouseleave', function() {
+                    this.style.borderColor = '#2a2a3a';
+                    this.style.backgroundColor = '#1a1a24';
+                });
+            });
+        }
+
+        // Función para seleccionar canción
+        async function selectSong(songId) {
+            try {
+                const response = await fetch(`/api/song/${songId}/details`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                displaySongDetails(data);
+                showTab('song');
+            } catch (error) {
+                console.error('Error obteniendo detalles de la canción:', error);
+                showError('Error cargando los detalles de la canción');
+            }
+        }
+
+        // Función para mostrar detalles de la canción
+        function displaySongDetails(song) {
+            const songDetails = document.getElementById('songDetails');
+            if (!songDetails) {
+                // Crear contenedor si no existe
+                const songContainer = document.createElement('div');
+                songContainer.id = 'songDetails';
+                songContainer.className = 'song-details';
+                songContainer.style.display = 'none';
+                document.querySelector('.main-content').appendChild(songContainer);
+            }
+            
+            // Generar enlaces con iconos
+            const linksHtml = generateLinksHtml(song.links);
+            
+            document.getElementById('songDetails').innerHTML = `
+                <div class="song-header">
+                    <button class="back-button" onclick="goBackToAlbum()" style="
+                        background: none; border: 1px solid #2a2a3a; color: #cba6f7; 
+                        padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-bottom: 20px;
+                        transition: all 0.2s ease;
+                    ">
+                        ← Volver al álbum
+                    </button>
+                    
+                    <div class="song-info-header" style="margin-bottom: 30px;">
+                        <h2 class="song-title" style="font-size: 2.2em; margin-bottom: 8px; color: #cba6f7;">
+                            ${song.title}
+                        </h2>
+                        <h3 style="font-size: 1.3em; margin-bottom: 15px; color: #fff;">
+                            ${song.artist} • ${song.album}
+                        </h3>
+                        <div class="song-meta" style="color: #888; font-size: 16px;">
+                            ${song.track_number ? `#${song.track_number}` : ''}
+                            ${song.duration ? ` • ${formatDuration(song.duration)}` : ''}
+                            ${song.genre ? ` • ${song.genre}` : ''}
+                            ${song.date ? ` • ${song.date}` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                ${linksHtml ? `
+                    <div class="song-links-section" style="margin-bottom: 30px;">
+                        <h3 style="color: #cba6f7; margin-bottom: 16px;">Enlaces</h3>
+                        <div class="song-links">
+                            ${linksHtml}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${song.has_lyrics && song.lyrics ? `
+                    <div class="lyrics-section">
+                        <h3 style="color: #cba6f7; margin-bottom: 16px;">
+                            Letras ${song.lyrics_source ? `(${song.lyrics_source})` : ''}
+                        </h3>
+                        <div class="lyrics-content" style="
+                            background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 12px;
+                            padding: 24px; line-height: 1.8; color: #ccc; font-size: 16px;
+                            white-space: pre-wrap; max-height: 400px; overflow-y: auto;
+                        ">
+                            ${song.lyrics}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${song.bitrate || song.sample_rate ? `
+                    <div class="technical-info" style="margin-top: 30px;">
+                        <h3 style="color: #cba6f7; margin-bottom: 16px;">Información técnica</h3>
+                        <div style="background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 8px; padding: 16px;">
+                            ${song.bitrate ? `<div>🎵 Bitrate: ${song.bitrate} kbps</div>` : ''}
+                            ${song.sample_rate ? `<div>📊 Sample Rate: ${song.sample_rate} Hz</div>` : ''}
+                            ${song.bit_depth ? `<div>🔊 Bit Depth: ${song.bit_depth} bits</div>` : ''}
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+            
+            // Guardar datos de la canción
+            window.currentSongData = song;
+        }
+
+        // Función para generar HTML de enlaces con iconos
+        function generateLinksHtml(links) {
+            if (!links) return '';
+            
+            const linkTypes = [
+                { key: 'spotify_url', name: 'Spotify', icon: 'spotify', color: '#1db954' },
+                { key: 'youtube_url', name: 'YouTube', icon: 'youtube', color: '#ff0000' },
+                { key: 'bandcamp_url', name: 'Bandcamp', icon: 'bandcamp', color: '#629aa0' },
+                { key: 'soundcloud_url', name: 'SoundCloud', icon: 'soundcloud', color: '#ff5500' },
+                { key: 'lastfm_url', name: 'Last.fm', icon: 'lastfm', color: '#d51007' },
+                { key: 'musicbrainz_url', name: 'MusicBrainz', icon: 'musicbrainz', color: '#ba478f' }
+            ];
+            
+            const availableLinks = linkTypes.filter(linkType => links[linkType.key]);
+            
+            if (availableLinks.length === 0) return '';
+            
+            return `
+                <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+                    ${availableLinks.map(linkType => `
+                        <a href="${links[linkType.key]}" target="_blank" rel="noopener noreferrer" 
+                        class="service-link" style="
+                        display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+                        background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 8px;
+                        color: ${linkType.color}; text-decoration: none; font-weight: 600;
+                        transition: all 0.2s ease;
+                        ">
+                            <img src="/api/icons/${linkType.icon}" alt="${linkType.name}" 
+                                style="width: 20px; height: 20px;" />
+                            ${linkType.name}
+                        </a>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Función para formatear duración
+        function formatDuration(seconds) {
+            if (!seconds) return '';
+            
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        // Funciones de navegación
+        function goBackToArtist() {
+            if (window.currentArtistData) {
+                displayArtistDetails(window.currentArtistData);
+                showTab('artist');
+            }
+        }
+
+        function goBackToAlbum() {
+            if (window.currentAlbumData) {
+                displayAlbumDetails(window.currentAlbumData);
+                showTab('album');
+            }
+        }
+
+        // Actualizar función showTab para incluir las nuevas pestañas
+        function showTab(tabName) {
+            // Ocultar todos los contenidos
+            document.querySelectorAll('.content-section').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            document.querySelectorAll('.artist-details, .album-details, .song-details').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            // Remover clase active de todas las pestañas
+            document.querySelectorAll('.tab-button').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Mostrar contenido seleccionado
+            if (tabName === 'artist') {
+                document.getElementById('artistDetails').style.display = 'block';
+            } else if (tabName === 'album') {
+                document.getElementById('albumDetails').style.display = 'block';
+            } else if (tabName === 'song') {
+                document.getElementById('songDetails').style.display = 'block';
+            } else {
+                const tabElement = document.querySelector(`[data-section="${tabName}"]`);
+                if (tabElement) {
+                    tabElement.style.display = 'block';
+                }
+                
+                const buttonElement = document.querySelector(`[data-tab="${tabName}"]`);
+                if (buttonElement) {
+                    buttonElement.classList.add('active');
+                }
+            }
+        }
+
+        // Hacer las funciones globales
+        window.selectAlbum = selectAlbum;
+        window.selectSong = selectSong;
+        window.goBackToArtist = goBackToArtist;
+        window.goBackToAlbum = goBackToAlbum;
+
 
         // Hacer las funciones globales para onclick
         window.toggleBio = toggleBio;

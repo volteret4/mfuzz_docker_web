@@ -1512,7 +1512,136 @@ def debug_artist_images(artist_id):
         explorer.logger.error(f"Error en debug de imágenes: {e}")
         return jsonify({'error': str(e)}), 500
 
+# CANCIONES
 
+
+@app.route('/api/album/<int:album_id>/details')
+def get_album_details_with_tracks(album_id):
+    """Obtener detalles completos del álbum con tracklist"""
+    conn = explorer.get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Error de base de datos'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Información del álbum
+        cursor.execute("""
+            SELECT al.*, ar.name as artist_name, ar.id as artist_id
+            FROM albums al
+            JOIN artists ar ON al.artist_id = ar.id
+            WHERE al.id = ? AND al.origen = 'local'
+        """, (album_id,))
+        
+        album = cursor.fetchone()
+        if not album:
+            conn.close()
+            return jsonify({'error': 'Álbum no encontrado'}), 404
+        
+        # Canciones del álbum con información completa
+        cursor.execute("""
+            SELECT s.*, 
+                   CASE WHEN l.lyrics IS NOT NULL THEN 1 ELSE 0 END as has_lyrics,
+                   sl.spotify_url, sl.youtube_url, sl.bandcamp_url
+            FROM songs s
+            LEFT JOIN lyrics l ON s.id = l.track_id
+            LEFT JOIN song_links sl ON s.id = sl.song_id
+            WHERE s.album = ? AND s.artist = ? AND s.origen = 'local'
+            ORDER BY s.track_number, s.title
+        """, (album['name'], album['artist_name']))
+        
+        tracks = []
+        for track_row in cursor.fetchall():
+            track_dict = dict(track_row)
+            tracks.append(track_dict)
+        
+        # Obtener imagen del álbum
+        album_dict = dict(album)
+        best_album_art = explorer.get_best_album_image(album_dict) if hasattr(explorer, 'get_best_album_image') else None
+        album_dict['best_album_art'] = best_album_art
+        
+        conn.close()
+        
+        return jsonify({
+            'album': album_dict,
+            'tracks': tracks,
+            'track_count': len(tracks)
+        })
+        
+    except Exception as e:
+        explorer.logger.error(f"Error obteniendo detalles del álbum: {e}")
+        if conn:
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/song/<int:song_id>/details')
+def get_song_details(song_id):
+    """Obtener detalles completos de una canción incluyendo letras y enlaces"""
+    conn = explorer.get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Error de base de datos'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Información de la canción
+        cursor.execute("""
+            SELECT s.*, 
+                   CASE WHEN l.lyrics IS NOT NULL THEN 1 ELSE 0 END as has_lyrics,
+                   l.lyrics, l.source as lyrics_source
+            FROM songs s
+            LEFT JOIN lyrics l ON s.id = l.track_id
+            WHERE s.id = ? AND s.origen = 'local'
+        """, (song_id,))
+        
+        song = cursor.fetchone()
+        if not song:
+            conn.close()
+            return jsonify({'error': 'Canción no encontrada'}), 404
+        
+        # Enlaces de la canción
+        cursor.execute("""
+            SELECT spotify_url, youtube_url, bandcamp_url, soundcloud_url, 
+                   lastfm_url, musicbrainz_url, preview_url
+            FROM song_links
+            WHERE song_id = ?
+        """, (song_id,))
+        
+        links = cursor.fetchone()
+        links_dict = dict(links) if links else {}
+        
+        conn.close()
+        
+        song_dict = dict(song)
+        song_dict['links'] = links_dict
+        
+        return jsonify(song_dict)
+        
+    except Exception as e:
+        explorer.logger.error(f"Error obteniendo detalles de la canción: {e}")
+        if conn:
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/icons/<icon_name>')
+def serve_icon(icon_name):
+    """Servir iconos SVG desde el directorio local"""
+    try:
+        icons_path = '/home/huan/gits/pollo/music-fuzzy/ui/svg'
+        
+        # Validar que el archivo existe y es SVG
+        if not icon_name.endswith('.svg'):
+            icon_name += '.svg'
+        
+        icon_path = os.path.join(icons_path, icon_name)
+        if not os.path.exists(icon_path):
+            return jsonify({'error': 'Icono no encontrado'}), 404
+        
+        return send_from_directory(icons_path, icon_name, mimetype='image/svg+xml')
+        
+    except Exception as e:
+        explorer.logger.error(f"Error sirviendo icono {icon_name}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Configuración del servidor
