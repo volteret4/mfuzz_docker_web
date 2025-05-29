@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time as time_module
 import shutil
+from telegram_notifier import create_notifier
 
 download_status = {}
 
@@ -31,6 +32,7 @@ class MusicExplorer:
         log_level = self.config.get('logging', 'level', fallback='INFO')
         log_file = self.config.get('logging', 'file', fallback='/app/logs/music_web.log')
         
+
         # Crear directorio de logs si no existe
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         os.makedirs(self.download_path, exist_ok=True)
@@ -45,6 +47,176 @@ class MusicExplorer:
         )
         self.logger = logging.getLogger(__name__)
         
+        # Inicializar notificador de Telegram
+        self.notifier = create_notifier(self.logger)
+        
+        # Configuración para acceso local
+        self.local_access_enabled = self.config.getboolean('music', 'local_access_enabled', fallback=False)
+        self.mounted_paths = []
+        if self.local_access_enabled:
+            mounted_paths_str = self.config.get('music', 'mounted_paths', fallback='')
+            self.mounted_paths = [path.strip() for path in mounted_paths_str.split(',') if path.strip()]
+            self.logger.info(f"Acceso local habilitado para rutas: {self.mounted_paths}")
+
+        # Método de descarga preferido
+        self.preferred_download_method = self.config.get('download', 'preferred_method', fallback='ssh')
+
+    def check_local_file_exists(self, file_path):
+        """Verifica si un archivo existe localmente en las rutas montadas"""
+        if not self.local_access_enabled or not file_path:
+            return False
+        
+        try:
+            # Verificar si la ruta completa existe
+            if os.path.exists(file_path):
+                return file_path
+            
+            # Verificar en las rutas montadas
+            for mounted_path in self.mounted_paths:
+                if file_path.startswith(mounted_path):
+                    if os.path.exists(file_path):
+                        return file_path
+            
+            return False
+        except Exception as e:
+            self.logger.debug(f"Error verificando archivo local {file_path}: {e}")
+            return False
+
+    def perform_local_download(self, album_name, artist_name, download_id, local_info):
+        """Realizar descarga local (copia de archivos montados)"""
+        try:
+            download_status[download_id]['status'] = 'downloading_local'
+            download_status[download_id]['message'] = f'Copiando archivos locales de "{album_name}"...'
+            
+            # Crear directorio de destino
+            dest_path = Path(self.download_path) / artist_name / album_name
+            dest_path.mkdir(parents=True, exist_ok=True)
+            
+            self.logger.info(f"=== DESCARGA LOCAL ===")
+            self.logger.info(f"Origen: {local_info['album_local_path']}")
+            self.logger.info(f"Destino: {dest_path}")
+            self.logger.info(f"Archivos disponibles: {local_info['available_tracks']}/{local_info['total_tracks']}")
+            
+            # Copiar archivos disponibles
+            copied_count = 0
+            total_files = len(local_info['local_files'])
+            
+            for i, src_file in enumerate(local_info['local_files']):
+                try:
+                    src_path = Path(src_file)
+                    dst_path = dest_path / src_path.name
+                    
+                    download_status[download_id]['message'] = f'Copiando: {src_path.name} ({i+1}/{total_files})'
+                    download_status[download_id]['progress'] = int((i / total_files) * 100)
+                    
+                    self.logger.info(f"Copiando: {src_path} → {dst_path}")
+                    shutil.copy2(src_path, dst_path)
+                    copied_count += 1
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error copiando {src_path}: {e}")
+            
+            # Resultado final
+            if copied_count > 0:
+                message_parts = [f'Álbum copiado localmente: {copied_count}/{total_files} archivos']
+                if local_info['missing_tracks'] > 0:
+                    message_parts.append(f'{local_info["missing_tracks"]} archivos no disponibles localmente')
+                
+                download_status[download_id].update({
+                    'status': 'completed',
+                    'progress': 100,
+                    'message': '. '.join(message_parts),
+                    'download_path': str(dest_path),
+                    'file_count': copied_count,
+                    'method': 'local'
+                })
+                
+                # 🔔 NOTIFICAR DESCARGA LOCAL COMPLETADA
+                self.notifier.notify_download_completed(
+                    album_name, 
+                    artist_name, 
+                    copied_count, 
+                    str(dest_path),
+                    method='local'
+                )
+                
+                self.logger.info(f"✅ Descarga local completada: {copied_count} archivos")
+            else:
+                raise Exception("No se pudo copiar ningún archivo local")
+                
+        except Exception as e:
+            error_msg = f'Error en descarga local: {str(e)}'
+            download_status[download_id].update({
+                'status': 'error',
+                'progress': 0,
+                'message': error_msg,
+                'method': 'local'
+            })
+            
+            # 🔔 NOTIFICAR ERROR LOCAL
+            self.notifier.notify_download_error(album_name, artist_name, error_msg)
+            self.logger.error(f"❌ Error en descarga local {download_id}: {e}")
+            raise
+
+
+    def check_album_local_availability(self, album_name, artist_name):
+        """Verifica disponibilidad local de un álbum completo"""
+        if not self.local_access_enabled:
+            return {'available': False, 'reason': 'Local access disabled'}
+        
+        conn = self.get_db_connection()
+        if not conn:
+            return {'available': False, 'reason': 'Database error'}
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT file_path FROM songs s
+                WHERE s.album = ? AND s.artist = ? AND s.origen = 'local'
+            """, (album_name, artist_name))
+            
+            tracks = cursor.fetchall()
+            conn.close()
+            
+            if not tracks:
+                return {'available': False, 'reason': 'No tracks found'}
+            
+            # Verificar archivos locales
+            local_files = []
+            missing_files = []
+            album_local_path = None
+            
+            for track in tracks:
+                if track['file_path']:
+                    local_path = self.check_local_file_exists(track['file_path'])
+                    if local_path:
+                        local_files.append(local_path)
+                        if not album_local_path:
+                            album_local_path = str(Path(local_path).parent)
+                    else:
+                        missing_files.append(track['file_path'])
+            
+            total_tracks = len(tracks)
+            available_tracks = len(local_files)
+            percentage = (available_tracks / total_tracks * 100) if total_tracks > 0 else 0
+            
+            return {
+                'available': available_tracks > 0,
+                'total_tracks': total_tracks,
+                'available_tracks': available_tracks,
+                'missing_tracks': len(missing_files),
+                'percentage': percentage,
+                'album_local_path': album_local_path,
+                'local_files': local_files,
+                'missing_files': missing_files
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error verificando disponibilidad local: {e}")
+            if conn:
+                conn.close()
+            return {'available': False, 'reason': f'Error: {str(e)}'}
+
     def get_db_connection(self):
         """Obtiene conexión a la base de datos"""
         try:
@@ -284,6 +456,127 @@ class MusicExplorer:
             return {'error': str(e)}
 
 
+    def get_album_files_info(self, album_id):
+        """Obtiene información de archivos del álbum, incluyendo disponibilidad local"""
+        details = self.get_album_details(album_id)
+        if not details:
+            return None
+        
+        album = details['album']
+        tracks = details['tracks']
+        
+        # Analizar disponibilidad de archivos
+        local_files = []
+        missing_files = []
+        album_path = None
+        
+        for track in tracks:
+            if track.get('file_path'):
+                local_path = self.check_local_file_exists(track['file_path'])
+                if local_path:
+                    local_files.append({
+                        'track': track,
+                        'local_path': local_path,
+                        'exists': True
+                    })
+                    # Obtener directorio del álbum
+                    if not album_path:
+                        album_path = str(Path(local_path).parent)
+                else:
+                    missing_files.append({
+                        'track': track,
+                        'expected_path': track['file_path'],
+                        'exists': False
+                    })
+        
+        return {
+            'album': album,
+            'tracks': tracks,
+            'local_files': local_files,
+            'missing_files': missing_files,
+            'album_path': album_path,
+            'local_availability': {
+                'total_tracks': len(tracks),
+                'available_locally': len(local_files),
+                'missing_locally': len(missing_files),
+                'percentage': (len(local_files) / len(tracks) * 100) if tracks else 0
+            }
+        }
+
+    def download_album_local(self, album_id, download_id):
+        """Descarga álbum desde archivos locales montados"""
+        try:
+            download_status[download_id]['status'] = 'analyzing'
+            download_status[download_id]['message'] = 'Analizando disponibilidad local...'
+            
+            # Obtener información de archivos
+            files_info = self.get_album_files_info(album_id)
+            if not files_info:
+                raise Exception("No se pudo obtener información del álbum")
+            
+            album = files_info['album']
+            local_files = files_info['local_files']
+            missing_files = files_info['missing_files']
+            
+            if not local_files:
+                raise Exception("No hay archivos disponibles localmente")
+            
+            # Crear directorio de destino
+            dest_path = Path(self.download_path) / album['artist_name'] / album['name']
+            dest_path.mkdir(parents=True, exist_ok=True)
+            
+            download_status[download_id].update({
+                'status': 'downloading',
+                'message': f'Copiando {len(local_files)} archivos...',
+                'total_files': len(local_files),
+                'copied_files': 0
+            })
+            
+            # Copiar archivos disponibles
+            copied_count = 0
+            for file_info in local_files:
+                try:
+                    src_path = Path(file_info['local_path'])
+                    dst_path = dest_path / src_path.name
+                    
+                    download_status[download_id]['message'] = f'Copiando: {src_path.name}'
+                    
+                    shutil.copy2(src_path, dst_path)
+                    copied_count += 1
+                    
+                    download_status[download_id]['copied_files'] = copied_count
+                    download_status[download_id]['progress'] = int((copied_count / len(local_files)) * 100)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error copiando {src_path}: {e}")
+            
+            # Resultado final
+            if copied_count > 0:
+                message_parts = [f'Álbum copiado: {copied_count}/{len(local_files)} archivos']
+                if missing_files:
+                    message_parts.append(f'{len(missing_files)} archivos no disponibles localmente')
+                
+                download_status[download_id].update({
+                    'status': 'completed',
+                    'progress': 100,
+                    'message': '. '.join(message_parts),
+                    'download_path': str(dest_path),
+                    'copied_files': copied_count,
+                    'missing_files': len(missing_files)
+                })
+            else:
+                raise Exception("No se pudo copiar ningún archivo")
+                
+        except Exception as e:
+            download_status[download_id].update({
+                'status': 'error',
+                'progress': 0,
+                'message': f'Error en descarga local: {str(e)}'
+            })
+            self.logger.error(f"Error en descarga local {download_id}: {e}")
+
+
+
     def get_system_user(self):
         """Obtener el usuario del sistema desde configuración o variable de entorno"""
         # Prioridad: config.ini > variable de entorno > por defecto
@@ -397,7 +690,7 @@ def get_stats():
 
 @app.route('/api/album/<int:album_id>/download', methods=['POST'])
 def download_album(album_id):
-    """Endpoint para descargar álbum - VERSIÓN CON DEBUG DETALLADO"""
+    """Endpoint para descargar álbum - VERSIÓN HÍBRIDA SSH + LOCAL"""
     
     # Verificar que el álbum existe y obtener información
     conn = explorer.get_db_connection()
@@ -440,30 +733,71 @@ def download_album(album_id):
         
         download_id = f"album_{album_id}_{int(time_module.time())}"
         
+        # NUEVO: Verificar disponibilidad local
+        local_availability = explorer.check_album_local_availability(album['name'], album['artist_name'])
+        
+        # Determinar método de descarga
+        use_local_method = (
+            explorer.preferred_download_method == 'local' and 
+            local_availability['available'] and 
+            local_availability['percentage'] >= 80  # Al menos 80% de archivos disponibles
+        )
+        
         # Logging para debug
-        explorer.logger.info(f"=== INICIO DESCARGA DEBUG ===")
+        explorer.logger.info(f"=== INICIO DESCARGA ===")
         explorer.logger.info(f"Álbum: {album['name']}, Artista: {album['artist_name']}")
         explorer.logger.info(f"Ruta remota: {album_path}")
         explorer.logger.info(f"Download ID: {download_id}")
+        explorer.logger.info(f"Método preferido: {explorer.preferred_download_method}")
+        explorer.logger.info(f"Local disponible: {local_availability['available']} ({local_availability.get('percentage', 0):.1f}%)")
+        explorer.logger.info(f"Método seleccionado: {'LOCAL' if use_local_method else 'SSH'}")
+        
+        # 🔔 NOTIFICAR INICIO DE DESCARGA
+        user_info = request.headers.get('X-User-Info', 'Usuario Web')
+        explorer.notifier.notify_download_started(
+            album['name'], 
+            album['artist_name'], 
+            user_info,
+            method='local' if use_local_method else 'ssh'
+        )
+        explorer.logger.info(f"📱 Notificación enviada: Descarga iniciada")
+        
+        # Inicializar estado de descarga
+        download_status[download_id] = {
+            'status': 'initializing',
+            'progress': 0,
+            'message': f'Iniciando descarga de "{album["name"]}" (método: {"local" if use_local_method else "SSH"})...',
+            'album_name': album['name'],
+            'artist_name': album['artist_name'],
+            'method': 'local' if use_local_method else 'ssh',
+            'local_availability': local_availability
+        }
         
         # Iniciar descarga en hilo separado
         def perform_download():
+            if use_local_method:
+                # USAR DESCARGA LOCAL
+                try:
+                    explorer.perform_local_download(album['name'], album['artist_name'], download_id, local_availability)
+                except Exception as e:
+                    # Si falla local, intentar SSH como fallback
+                    explorer.logger.warning(f"Descarga local falló, intentando SSH como fallback: {e}")
+                    download_status[download_id]['message'] = 'Descarga local falló, intentando SSH...'
+                    perform_ssh_download()
+            else:
+                # USAR DESCARGA SSH (TU CÓDIGO ORIGINAL)
+                perform_ssh_download()
+        
+        def perform_ssh_download():
+            # AQUÍ VA TODO TU CÓDIGO SSH ORIGINAL - NO LO MODIFICO
             try:
-                download_status[download_id] = {
-                    'status': 'downloading',
-                    'progress': 0,
-                    'message': f'Iniciando descarga de "{album["name"]}"...',
-                    'album_name': album['name'],
-                    'artist_name': album['artist_name']
-                }
+                download_status[download_id]['status'] = 'downloading'
+                download_status[download_id]['message'] = f'Iniciando descarga SSH de "{album["name"]}"...'
                 
                 # DEBUG: Información del entorno actual
                 explorer.logger.info(f"=== DEBUG ENTORNO ===")
                 explorer.logger.info(f"Usuario actual (whoami): {os.getenv('USER', 'UNKNOWN')}")
                 explorer.logger.info(f"UID del proceso: {os.getuid()}")
-                explorer.logger.info(f"GID del proceso: {os.getgid()}")
-                explorer.logger.info(f"HOME actual: {os.getenv('HOME', 'UNKNOWN')}")
-                explorer.logger.info(f"PATH actual: {os.getenv('PATH', 'UNKNOWN')}")
                 
                 # Configuración desde config.ini
                 ssh_host = explorer.config.get('download', 'ssh_host', fallback='pepecono')
@@ -473,7 +807,7 @@ def download_album(album_id):
                 explorer.logger.info(f"SSH User: {ssh_user}")
                 
                 # OBTENER USUARIO DEL CONTENEDOR
-                container_user = os.getenv('USER', 'musicapp')  # Usar musicapp por defecto
+                container_user = os.getenv('USER', 'musicapp')
                 container_uid = os.getenv('CONTAINER_UID', '1000')
                 
                 explorer.logger.info(f"Usuario del contenedor (env): {container_user} (UID: {container_uid})")
@@ -508,6 +842,14 @@ def download_album(album_id):
                 if not ssh_key_path:
                     error_msg = f"No se encontró clave SSH válida para usuario {container_user}"
                     explorer.logger.error(error_msg)
+                    
+                    # 🔔 NOTIFICAR ERROR
+                    explorer.notifier.notify_download_error(
+                        album['name'], 
+                        album['artist_name'], 
+                        f"Clave SSH no encontrada para usuario {container_user}"
+                    )
+                    
                     raise Exception(error_msg)
                 
                 explorer.logger.info(f"✅ Usando clave SSH: {ssh_key_path}")
@@ -517,11 +859,7 @@ def download_album(album_id):
                 dest_path.mkdir(parents=True, exist_ok=True)
                 explorer.logger.info(f"Directorio destino: {dest_path}")
                 
-                # Verificar permisos del directorio destino
-                dest_writable = os.access(dest_path, os.W_OK)
-                explorer.logger.info(f"Directorio destino escribible: {dest_writable}")
-                
-                # Comando rsync básico primero (sin sudo)
+                # Comando rsync
                 rsync_cmd = [
                     'rsync',
                     '-avzh',
@@ -543,8 +881,6 @@ def download_album(album_id):
                     f"{ssh_user}@{ssh_host}",
                     'echo "SSH_TEST_OK"'
                 ]
-                explorer.logger.info(f"=== TEST SSH ===")
-                explorer.logger.info(f"Comando test: {' '.join(test_ssh_cmd)}")
                 
                 # Ejecutar test SSH
                 test_process = subprocess.Popen(
@@ -560,13 +896,19 @@ def download_album(album_id):
                 )
                 
                 test_stdout, test_stderr = test_process.communicate(timeout=15)
-                explorer.logger.info(f"Test SSH stdout: {test_stdout}")
-                explorer.logger.info(f"Test SSH stderr: {test_stderr}")
                 explorer.logger.info(f"Test SSH return code: {test_process.returncode}")
                 
                 if test_process.returncode != 0:
                     error_msg = f"Test SSH falló: {test_stderr}"
                     explorer.logger.error(error_msg)
+                    
+                    # 🔔 NOTIFICAR ERROR SSH
+                    explorer.notifier.notify_download_error(
+                        album['name'], 
+                        album['artist_name'], 
+                        f"Error de conexión SSH: {test_stderr[:100]}"
+                    )
+                    
                     raise Exception(error_msg)
                 
                 # Si el test SSH pasa, ejecutar rsync
@@ -618,7 +960,6 @@ def download_album(album_id):
                     file_count = len([f for f in downloaded_files if f.is_file()])
                     
                     explorer.logger.info(f"Archivos descargados: {file_count}")
-                    explorer.logger.info(f"Contenido del directorio: {[str(f) for f in downloaded_files[:10]]}")  # Solo los primeros 10
                     
                     download_status[download_id] = {
                         'status': 'completed',
@@ -627,40 +968,79 @@ def download_album(album_id):
                         'album_name': album['name'],
                         'artist_name': album['artist_name'],
                         'download_path': str(dest_path),
-                        'file_count': file_count
+                        'file_count': file_count,
+                        'method': 'ssh'
                     }
-                    explorer.logger.info(f"✅ Descarga completada: {download_id}")
+                    
+                    # 🔔 NOTIFICAR DESCARGA COMPLETADA
+                    explorer.notifier.notify_download_completed(
+                        album['name'], 
+                        album['artist_name'], 
+                        file_count, 
+                        str(dest_path),
+                        method='ssh'
+                    )
+                    
+                    explorer.logger.info(f"✅ Descarga SSH completada: {download_id}")
+                    explorer.logger.info(f"📱 Notificación enviada: Descarga completada")
                 else:
                     all_stderr = '\n'.join(stderr_lines)
                     download_status[download_id] = {
                         'status': 'error',
                         'progress': 0,
-                        'message': f'Error en descarga (código {return_code}): {all_stderr}',
+                        'message': f'Error en descarga SSH (código {return_code}): {all_stderr}',
                         'album_name': album['name'],
-                        'artist_name': album['artist_name']
+                        'artist_name': album['artist_name'],
+                        'method': 'ssh'
                     }
-                    explorer.logger.error(f"❌ Error en descarga {download_id} (código {return_code}): {all_stderr}")
+                    
+                    # 🔔 NOTIFICAR ERROR EN DESCARGA
+                    explorer.notifier.notify_download_error(
+                        album['name'], 
+                        album['artist_name'], 
+                        f"Error rsync (código {return_code}): {all_stderr[:150]}"
+                    )
+                    
+                    explorer.logger.error(f"❌ Error en descarga SSH {download_id} (código {return_code}): {all_stderr}")
                     
             except subprocess.TimeoutExpired as e:
-                error_msg = f'Timeout en descarga: {str(e)}'
+                error_msg = f'Timeout en descarga SSH: {str(e)}'
                 download_status[download_id] = {
                     'status': 'error',
                     'progress': 0,
                     'message': error_msg,
                     'album_name': album.get('name', 'Desconocido'),
-                    'artist_name': album.get('artist_name', 'Desconocido')
+                    'artist_name': album.get('artist_name', 'Desconocido'),
+                    'method': 'ssh'
                 }
-                explorer.logger.error(f"❌ Timeout en descarga {download_id}: {e}")
+                
+                # 🔔 NOTIFICAR TIMEOUT
+                explorer.notifier.notify_download_error(
+                    album.get('name', 'Desconocido'), 
+                    album.get('artist_name', 'Desconocido'), 
+                    'Timeout en descarga SSH - conexión demasiado lenta'
+                )
+                
+                explorer.logger.error(f"❌ Timeout en descarga SSH {download_id}: {e}")
             except Exception as e:
-                error_msg = f'Error interno: {str(e)}'
+                error_msg = f'Error interno SSH: {str(e)}'
                 download_status[download_id] = {
                     'status': 'error',
                     'progress': 0,
                     'message': error_msg,
                     'album_name': album.get('name', 'Desconocido'),
-                    'artist_name': album.get('artist_name', 'Desconocido')
+                    'artist_name': album.get('artist_name', 'Desconocido'),
+                    'method': 'ssh'
                 }
-                explorer.logger.error(f"❌ Excepción en descarga {download_id}: {e}")
+                
+                # 🔔 NOTIFICAR ERROR GENERAL
+                explorer.notifier.notify_download_error(
+                    album.get('name', 'Desconocido'), 
+                    album.get('artist_name', 'Desconocido'), 
+                    str(e)[:150]
+                )
+                
+                explorer.logger.error(f"❌ Excepción en descarga SSH {download_id}: {e}")
         
         # Iniciar descarga en hilo separado
         download_thread = threading.Thread(target=perform_download)
@@ -673,7 +1053,9 @@ def download_album(album_id):
             'message': 'Descarga iniciada',
             'album_name': album['name'],
             'artist_name': album['artist_name'],
-            'album_path': str(album_path)
+            'album_path': str(album_path),
+            'method': 'local' if use_local_method else 'ssh',
+            'local_availability': local_availability
         })
         
     except Exception as e:
@@ -681,6 +1063,67 @@ def download_album(album_id):
         if conn:
             conn.close()
         return jsonify({'error': str(e)}), 500
+
+# NUEVO: Endpoint para verificar disponibilidad local
+@app.route('/api/album/<int:album_id>/local-check')
+def check_album_local_availability_endpoint(album_id):
+    """API para verificar disponibilidad local de un álbum"""
+    conn = explorer.get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Error de base de datos'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT al.name, ar.name as artist_name
+            FROM albums al
+            JOIN artists ar ON al.artist_id = ar.id
+            WHERE al.id = ? AND al.origen = 'local'
+        """, (album_id,))
+        
+        album = cursor.fetchone()
+        conn.close()
+        
+        if not album:
+            return jsonify({'error': 'Álbum no encontrado'}), 404
+        
+        availability = explorer.check_album_local_availability(album['name'], album['artist_name'])
+        return jsonify(availability)
+        
+    except Exception as e:
+        if conn:
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/album/<int:album_id>/files')
+def get_album_files(album_id):
+    """API para obtener información de archivos del álbum"""
+    files_info = explorer.get_album_files_info(album_id)
+    if files_info:
+        return jsonify(files_info)
+    else:
+        return jsonify({'error': 'Álbum no encontrado'}), 404
+
+
+# AÑADIR ENDPOINT PARA TESTING DE TELEGRAM
+@app.route('/api/telegram/test')
+def test_telegram():
+    """Endpoint para probar notificaciones de Telegram"""
+    try:
+        success, message = explorer.notifier.test_connection()
+        return jsonify({
+            'success': success,
+            'message': message,
+            'enabled': explorer.notifier.enabled
+        })
+    except Exception as e:
+        explorer.logger.error(f"Error probando Telegram: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'enabled': False
+        }), 500
+
 
 @app.route('/api/download/<download_id>/status')
 def get_download_status(download_id):

@@ -22,12 +22,17 @@ services:
       # Configuración personalizada (opcional)
       - /home/huan/gits/pollo/mfuzz_docker_web/config.ini:/app/config.ini:ro
     
+      - /mnt/NFS/moode/moode:/mnt/NFS/moode/moode:ro
+ 
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Madrid
-      # UID/GID del usuario en el contenedor (sobrescriben config.ini)
-      - PUID=1000
-      - PGID=1000
+      - USER=dietpi
+      # Configuración de Telegram
+      - TELEGRAM_BOT_TOKEN=5497935650:AAHZSY-Jw9OxQx2qwKcQtBH2D7ej9GyGaio
+      - TELEGRAM_CHAT_ID=905051261
+      # Habilitar/deshabilitar notificaciones
+      - TELEGRAM_ENABLED=true
 
     restart: unless-stopped
     

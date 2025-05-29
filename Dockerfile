@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar archivos de la aplicación
 COPY app.py music_manager.py config.ini ./
+COPY telegram_notifier.py /app/
 COPY templates/ ./templates/
 
 # Copiar configuraciones
