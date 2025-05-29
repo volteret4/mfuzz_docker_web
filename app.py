@@ -62,24 +62,23 @@ class MusicExplorer:
         self.preferred_download_method = self.config.get('download', 'preferred_method', fallback='ssh')
 
     def check_local_file_exists(self, file_path):
-        """Verifica si un archivo existe localmente en las rutas montadas"""
+        """Versión simple de verificación de archivos"""
         if not self.local_access_enabled or not file_path:
             return False
         
         try:
-            # Verificar si la ruta completa existe
-            if os.path.exists(file_path):
-                return file_path
+            # 1. Verificar ruta completa
+            if os.path.exists(file_path) and os.access(file_path, os.R_OK):
+                return True
             
-            # Verificar en las rutas montadas
+            # 2. Verificar en rutas montadas
             for mounted_path in self.mounted_paths:
-                if file_path.startswith(mounted_path):
-                    if os.path.exists(file_path):
-                        return file_path
+                if file_path.startswith(mounted_path) and os.path.exists(file_path):
+                    return True
             
             return False
         except Exception as e:
-            self.logger.debug(f"Error verificando archivo local {file_path}: {e}")
+            self.logger.debug(f"Error verificando {file_path}: {e}")
             return False
 
     def perform_local_download(self, album_name, artist_name, download_id, local_info):
@@ -227,6 +226,24 @@ class MusicExplorer:
             self.logger.error(f"Error conectando a la base de datos: {e}")
             return None
     
+    def get_album_image(self, album_dict):
+        """Función simple para obtener imagen de álbum"""
+        # 1. album_art_path
+        if album_dict.get('album_art_path') and self.check_local_file_exists(album_dict['album_art_path']):
+            return album_dict['album_art_path']
+        
+        # 2. Buscar cover.jpg/png en directorio
+        if album_dict.get('sample_path'):
+            album_dir = str(Path(album_dict['sample_path']).parent)
+            for cover_name in ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png']:
+                cover_path = os.path.join(album_dir, cover_name)
+                if self.check_local_file_exists(cover_path):
+                    return cover_path
+        
+        return None
+
+
+
     def search_artists(self, query, limit=50):
         """Busca artistas por nombre"""
         conn = self.get_db_connection()
@@ -237,14 +254,12 @@ class MusicExplorer:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT a.id, a.name, a.bio, a.origin, a.formed_year, 
-                       a.img, a.wikipedia_content,
-                       COUNT(DISTINCT al.id) as album_count,
-                       COUNT(DISTINCT s.id) as song_count
+                    a.img, a.img_urls, a.img_paths, a.wikipedia_content,
+                    COUNT(DISTINCT al.id) as album_count,
+                    COUNT(DISTINCT s.id) as song_count
                 FROM artists a
                 LEFT JOIN albums al ON a.id = al.artist_id AND al.origen = 'local'
-                LEFT JOIN songs s ON a.id = (
-                    SELECT ar2.id FROM artists ar2 WHERE ar2.name = s.artist AND s.origen = 'local'
-                )
+                LEFT JOIN songs s ON a.name = s.artist AND s.origen = 'local'
                 WHERE a.name LIKE ? AND a.origen = 'local'
                 GROUP BY a.id, a.name
                 ORDER BY a.name COLLATE NOCASE
@@ -253,25 +268,48 @@ class MusicExplorer:
             
             results = []
             for row in cursor.fetchall():
+                # Obtener la mejor imagen
+                best_image = None
+                
+                # Primero img
+                if row['img'] and os.path.exists(row['img']):
+                    best_image = row['img']
+                # Luego img_paths
+                elif row['img_paths']:
+                    try:
+                        import json
+                        paths = json.loads(row['img_paths'])
+                        if isinstance(paths, list) and len(paths) > 0:
+                            first_path = paths[0]
+                            if first_path and os.path.exists(first_path):
+                                best_image = first_path
+                    except:
+                        pass
+                
                 results.append({
                     'id': row['id'],
                     'name': row['name'],
                     'bio': row['bio'],
                     'origin': row['origin'],
                     'formed_year': row['formed_year'],
-                    'img': row['img'],
+                    'img': best_image,
                     'wikipedia_content': row['wikipedia_content'],
-                    'album_count': row['album_count'],
-                    'song_count': row['song_count']
+                    'album_count': row['album_count'] or 0,
+                    'song_count': row['song_count'] or 0
                 })
             
             conn.close()
             return results
+            
         except Exception as e:
             self.logger.error(f"Error buscando artistas: {e}")
-            conn.close()
+            if conn:
+                conn.close()
             return []
+
     
+   
+
     def get_artist_details(self, artist_id):
         """Obtiene detalles completos de un artista"""
         conn = self.get_db_connection()
@@ -279,10 +317,12 @@ class MusicExplorer:
             return None
         
         try:
-            # Información del artista
             cursor = conn.cursor()
+            
+            # Información del artista
             cursor.execute("""
-                SELECT * FROM artists WHERE id = ? AND origen = 'local'
+                SELECT *, img, img_urls, img_paths FROM artists 
+                WHERE id = ? AND origen = 'local'
             """, (artist_id,))
             
             artist = cursor.fetchone()
@@ -290,12 +330,11 @@ class MusicExplorer:
                 conn.close()
                 return None
             
-            # Álbumes del artista CON CONTEO CORRECTO DE CANCIONES
+            # Álbumes del artista
             cursor.execute("""
-                SELECT al.*, 
+                SELECT al.*, al.album_art_path,
                     COUNT(s.id) as track_count,
-                    MIN(s.file_path) as sample_path,
-                    MIN(s.album_art_path_denorm) as album_art_from_songs
+                    MIN(s.file_path) as sample_path
                 FROM albums al
                 LEFT JOIN songs s ON (al.name = s.album AND s.artist = ? AND s.origen = 'local')
                 WHERE al.artist_id = ? AND al.origen = 'local'
@@ -307,24 +346,26 @@ class MusicExplorer:
             for album_row in cursor.fetchall():
                 album_dict = dict(album_row)
                 
-                # Extraer directorio del álbum si hay sample_path
-                if album_dict['sample_path']:
-                    song_path = Path(album_dict['sample_path'])
-                    album_dict['album_directory'] = str(song_path.parent)
-                else:
-                    album_dict['album_directory'] = None
+                # Buscar imagen del álbum
+                best_album_art = None
                 
-                # Usar la mejor imagen disponible
-                if album_dict['album_art_path']:
-                    album_dict['best_album_art'] = album_dict['album_art_path']
-                elif album_dict['album_art_from_songs']:
-                    album_dict['best_album_art'] = album_dict['album_art_from_songs']
-                else:
-                    album_dict['best_album_art'] = None
-                    
+                # 1. album_art_path
+                if album_dict.get('album_art_path') and os.path.exists(album_dict['album_art_path']):
+                    best_album_art = album_dict['album_art_path']
+                # 2. Buscar en directorio
+                elif album_dict.get('sample_path'):
+                    from pathlib import Path
+                    album_dir = str(Path(album_dict['sample_path']).parent)
+                    for cover_name in ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png']:
+                        cover_path = os.path.join(album_dir, cover_name)
+                        if os.path.exists(cover_path):
+                            best_album_art = cover_path
+                            break
+                
+                album_dict['best_album_art'] = best_album_art
                 albums.append(album_dict)
             
-            # Canciones populares (por reproducciones)  
+            # Canciones populares
             cursor.execute("""
                 SELECT s.*, COALESCE(s.reproducciones, 1) as play_count
                 FROM songs s
@@ -339,16 +380,86 @@ class MusicExplorer:
             
             conn.close()
             
+            # Obtener imagen del artista
+            artist_dict = dict(artist)
+            best_artist_image = None
+            
+            # Primero img
+            if artist_dict.get('img') and os.path.exists(artist_dict['img']):
+                best_artist_image = artist_dict['img']
+            # Luego img_paths
+            elif artist_dict.get('img_paths'):
+                try:
+                    import json
+                    paths = json.loads(artist_dict['img_paths'])
+                    if isinstance(paths, list) and len(paths) > 0:
+                        first_path = paths[0]
+                        if first_path and os.path.exists(first_path):
+                            best_artist_image = first_path
+                except:
+                    pass
+            
+            artist_dict['img'] = best_artist_image
+            
             return {
-                'artist': dict(artist),
+                'artist': artist_dict,
                 'albums': albums,
                 'popular_songs': popular_songs
             }
             
         except Exception as e:
             self.logger.error(f"Error obteniendo detalles del artista: {e}")
-            conn.close()
+            if conn:
+                conn.close()
             return None
+
+    def get_artist_image(self, artist_row):
+        """Función simple para obtener imagen de artista"""
+        if not artist_row:
+            return None
+        
+        # 1. Columna img
+        if artist_row.get('img') and self.check_local_file_exists_simple(artist_row['img']):
+            return artist_row['img']
+        
+        # 2. img_paths como JSON
+        if artist_row.get('img_paths'):
+            try:
+                import json
+                paths = json.loads(artist_row['img_paths'])
+                if isinstance(paths, list) and len(paths) > 0:
+                    first_path = paths[0]
+                    if first_path and self.check_local_file_exists_simple(first_path):
+                        return first_path
+            except:
+                pass
+        
+        # 3. img_urls como JSON (buscar campo 'path')
+        if artist_row.get('img_urls'):
+            try:
+                import json
+                urls = json.loads(artist_row['img_urls'])
+                if isinstance(urls, list) and len(urls) > 0:
+                    first_item = urls[0]
+                    if isinstance(first_item, dict) and 'path' in first_item:
+                        path = first_item['path']
+                        if path and self.check_local_file_exists_simple(path):
+                            return path
+            except:
+                pass
+        
+        return None
+
+
+    def generate_image_url(image_path):
+        """Genera URL para servir imagen local"""
+        if not image_path:
+            return None
+        
+        import urllib.parse
+        encoded_path = urllib.parse.quote(image_path.encode('utf-8'))
+        return f"/api/image/{encoded_path}"
+
     
     def get_album_details(self, album_id):
         """Obtiene detalles de un álbum"""
@@ -502,6 +613,83 @@ class MusicExplorer:
                 'percentage': (len(local_files) / len(tracks) * 100) if tracks else 0
             }
         }
+
+    def get_best_artist_image(self, artist_row):
+        """Helper para obtener la mejor imagen de un artista"""
+        if not artist_row or not self.local_access_enabled:
+            return None
+        
+        # 1. Columna img (ruta principal)
+        if artist_row.get('img'):
+            img_path = artist_row['img']
+            if self.check_local_file_exists(img_path):
+                return img_path
+        
+        # 2. Columna img_paths (JSON con múltiples rutas)
+        if artist_row.get('img_paths'):
+            try:
+                import json
+                paths = json.loads(artist_row['img_paths'])
+                if isinstance(paths, list):
+                    for path in paths:
+                        if path and self.check_local_file_exists(path):
+                            return path
+            except (json.JSONDecodeError, TypeError):
+                # Si no es JSON, intentar como CSV
+                paths = [p.strip() for p in str(artist_row['img_paths']).split(',') if p.strip()]
+                for path in paths:
+                    if self.check_local_file_exists(path):
+                        return path
+        
+        # 3. Columna img_urls (solo rutas locales)
+        if artist_row.get('img_urls'):
+            try:
+                import json
+                urls = json.loads(artist_row['img_urls'])
+                if isinstance(urls, list):
+                    for item in urls:
+                        # Puede ser string o dict con 'path'
+                        path = item.get('path') if isinstance(item, dict) else item
+                        if path and not str(path).startswith(('http://', 'https://')) and self.check_local_file_exists(path):
+                            return path
+            except (json.JSONDecodeError, TypeError):
+                # Si no es JSON, intentar como CSV
+                urls = [u.strip() for u in str(artist_row['img_urls']).split(',') if u.strip()]
+                for url in urls:
+                    if not url.startswith(('http://', 'https://')) and self.check_local_file_exists(url):
+                        return url
+        
+        return None
+
+
+    def get_best_album_image(self, album_dict):
+        """Helper para obtener la mejor imagen de un álbum"""
+        # 1. album_art_path del álbum
+        if album_dict.get('album_art_path'):
+            if self.check_local_file_exists(album_dict['album_art_path']):
+                self.logger.info(f"Imagen de álbum encontrada: {album_dict['album_art_path']}")
+                return album_dict['album_art_path']
+        
+        # 2. album_art_path_denorm de canciones
+        if album_dict.get('song_album_art'):
+            if self.check_local_file_exists(album_dict['song_album_art']):
+                self.logger.info(f"Imagen de canción encontrada: {album_dict['song_album_art']}")
+                return album_dict['song_album_art']
+        
+        # 3. Buscar en el directorio del álbum
+        if album_dict.get('album_directory'):
+            common_names = [
+                'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png',
+                'album.jpg', 'album.png', 'front.jpg', 'front.png',
+                'albumart.jpg', 'albumartsmall.jpg', 'thumb.jpg'
+            ]
+            for img_name in common_names:
+                img_path = os.path.join(album_dict['album_directory'], img_name)
+                if self.check_local_file_exists(img_path):
+                    self.logger.info(f"Imagen de álbum descubierta: {img_path}")
+                    return img_path
+        
+        return None
 
     def download_album_local(self, album_id, download_id):
         """Descarga álbum desde archivos locales montados"""
@@ -1155,6 +1343,176 @@ def handle_options(path):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
+
+
+# Añadir estas funciones a tu app.py
+
+@app.route('/api/image/<path:image_path>')
+def serve_image(image_path):
+    """Servir imágenes desde las rutas montadas localmente"""
+    try:
+        import urllib.parse
+        decoded_path = urllib.parse.unquote(image_path)
+        
+        explorer.logger.info(f"Solicitando imagen: {decoded_path}")
+        
+        if not explorer.local_access_enabled:
+            return jsonify({'error': 'Acceso local deshabilitado'}), 404
+        
+        # Verificar si existe tal como está
+        if os.path.exists(decoded_path) and os.access(decoded_path, os.R_OK):
+            directory = os.path.dirname(decoded_path)
+            filename = os.path.basename(decoded_path)
+            explorer.logger.info(f"Imagen encontrada: {decoded_path}")
+            return send_from_directory(directory, filename)
+        
+        # Si no existe, devolver error
+        explorer.logger.warning(f"Imagen no encontrada: {decoded_path}")
+        return jsonify({'error': 'Imagen no encontrada'}), 404
+        
+    except Exception as e:
+        explorer.logger.error(f"Error sirviendo imagen: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+
+
+@app.route('/api/artist/<int:artist_id>/debug')
+def debug_artist_images(artist_id):
+    """Endpoint de debug para imágenes"""
+    try:
+        conn = explorer.get_db_connection()
+        if not conn:
+            return jsonify({'error': 'Error de conexión a BD'}), 500
+        
+        cursor = conn.cursor()
+        
+        # Obtener información del artista
+        cursor.execute("""
+            SELECT name, img, img_urls, img_paths FROM artists 
+            WHERE id = ? AND origen = 'local'
+        """, (artist_id,))
+        
+        artist = cursor.fetchone()
+        if not artist:
+            conn.close()
+            return jsonify({'error': 'Artista no encontrado'}), 404
+        
+        # Obtener álbumes con imágenes
+        cursor.execute("""
+            SELECT al.name, al.album_art_path, MIN(s.album_art_path_denorm) as song_album_art,
+                   MIN(s.file_path) as sample_path
+            FROM albums al
+            LEFT JOIN songs s ON (al.name = s.album AND s.artist = ? AND s.origen = 'local')
+            WHERE al.artist_id = ? AND al.origen = 'local'
+            GROUP BY al.id, al.name
+        """, (artist['name'], artist_id))
+        
+        albums = cursor.fetchall()
+        conn.close()
+        
+        debug_info = {
+            'artist_id': artist_id,
+            'artist_name': artist['name'],
+            'artist_images': {
+                'img': {
+                    'value': artist.get('img'),
+                    'exists': explorer.check_local_file_exists(artist.get('img')) if artist.get('img') else False
+                },
+                'img_urls': {
+                    'value': artist.get('img_urls'),
+                    'parsed': []
+                },
+                'img_paths': {
+                    'value': artist.get('img_paths'),
+                    'parsed': []
+                }
+            },
+            'albums': []
+        }
+        
+        # Procesar img_urls
+        if artist.get('img_urls'):
+            try:
+                import json
+                urls = json.loads(artist['img_urls'])
+                if isinstance(urls, list):
+                    for url in urls:
+                        debug_info['artist_images']['img_urls']['parsed'].append({
+                            'url': url,
+                            'is_local': not url.startswith(('http://', 'https://')),
+                            'exists': explorer.check_local_file_exists(url) if not url.startswith(('http://', 'https://')) else None
+                        })
+            except:
+                # Intentar como CSV
+                urls = [u.strip() for u in artist['img_urls'].split(',')]
+                for url in urls:
+                    if url:
+                        debug_info['artist_images']['img_urls']['parsed'].append({
+                            'url': url,
+                            'is_local': not url.startswith(('http://', 'https://')),
+                            'exists': explorer.check_local_file_exists(url) if not url.startswith(('http://', 'https://')) else None
+                        })
+        
+        # Procesar img_paths
+        if artist.get('img_paths'):
+            try:
+                import json
+                paths = json.loads(artist['img_paths'])
+                if isinstance(paths, list):
+                    for path in paths:
+                        debug_info['artist_images']['img_paths']['parsed'].append({
+                            'path': path,
+                            'exists': explorer.check_local_file_exists(path)
+                        })
+            except:
+                # Intentar como CSV
+                paths = [p.strip() for p in artist['img_paths'].split(',')]
+                for path in paths:
+                    if path:
+                        debug_info['artist_images']['img_paths']['parsed'].append({
+                            'path': path,
+                            'exists': explorer.check_local_file_exists(path)
+                        })
+        
+        # Procesar álbumes
+        for album in albums:
+            album_debug = {
+                'name': album['name'],
+                'album_art_path': {
+                    'value': album.get('album_art_path'),
+                    'exists': explorer.check_local_file_exists(album.get('album_art_path')) if album.get('album_art_path') else False
+                },
+                'song_album_art': {
+                    'value': album.get('song_album_art'),
+                    'exists': explorer.check_local_file_exists(album.get('song_album_art')) if album.get('song_album_art') else False
+                },
+                'sample_path': album.get('sample_path'),
+                'directory_images': []
+            }
+            
+            # Buscar imágenes en el directorio del álbum
+            if album.get('sample_path'):
+                album_dir = str(Path(album['sample_path']).parent)
+                common_names = ['cover.jpg', 'folder.jpg', 'album.jpg', 'front.jpg', 'cover.png']
+                for img_name in common_names:
+                    img_path = os.path.join(album_dir, img_name)
+                    if explorer.check_local_file_exists(img_path):
+                        album_debug['directory_images'].append({
+                            'name': img_name,
+                            'path': img_path,
+                            'exists': True
+                        })
+            
+            debug_info['albums'].append(album_debug)
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        explorer.logger.error(f"Error en debug de imágenes: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 
 if __name__ == '__main__':
     # Configuración del servidor

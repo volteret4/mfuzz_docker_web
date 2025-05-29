@@ -24,6 +24,8 @@ services:
     
       - /mnt/NFS/moode/moode:/mnt/NFS/moode/moode:ro
  
+      - /home/huan/gits/pollo/music-fuzzy/.content/:/home/huan/gits/pollo/music-fuzzy/.content/:ro
+    
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Madrid

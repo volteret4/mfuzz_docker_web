@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Explorador de Música</title>
+    <title>Music Explorer</title>
     <style>
         * {
             margin: 0;
@@ -12,136 +12,377 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #14141e;
+            color: #fff;
+            line-height: 1.4;
             min-height: 100vh;
-            color: #333;
         }
 
-        .container {
+        /* Header minimalista */
+        .header {
+            background: rgba(20, 20, 30, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid #2a2a3a;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        /* Barra de búsqueda */
+        .search-container {
+            flex: 1;
+            max-width: 600px;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            font-size: 16px;
+            background: #1a1a24;
+            color: #fff;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #cba6f7;
+            background: #1f1f2e;
+            box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.1);
+        }
+
+        .search-input::placeholder {
+            color: #666;
+        }
+
+        /* Tabs navegación */
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.2s ease;
+            color: #666;
+        }
+
+        .tab-button:hover {
+            background: rgba(203, 166, 247, 0.1);
+            color: #cba6f7;
+        }
+
+        .tab-button.active {
+            background: #cba6f7;
+            color: #14141e;
+        }
+
+        /* Contenido principal */
+        .main-content {
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
 
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-            color: white;
-        }
-
-        h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .search-section {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-
-        .search-container {
-            position: relative;
-            margin-bottom: 20px;
-        }
-
-        #artistSearch {
-            width: 100%;
-            padding: 15px 20px;
-            font-size: 16px;
-            border: 2px solid #ddd;
-            border-radius: 10px;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-
-        #artistSearch:focus {
-            border-color: #667eea;
-        }
-
-        .search-results {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: white;
-            border: 1px solid #ddd;
-            border-top: none;
-            border-radius: 0 0 10px 10px;
-            max-height: 300px;
-            overflow-y: auto;
-            z-index: 1000;
+        /* Pestañas de contenido */
+        .content-section {
             display: none;
         }
 
-        .search-result-item {
-            padding: 12px 20px;
+        .content-section.active {
+            display: block;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+
+        /* Lista de elementos */
+        .items-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .item-card {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 16px;
             cursor: pointer;
-            border-bottom: 1px solid #eee;
-            transition: background-color 0.2s;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .search-result-item:hover {
-            background-color: #f5f5f5;
+        .item-card:hover {
+            border-color: #cba6f7;
+            box-shadow: 0 2px 8px rgba(203, 166, 247, 0.2);
+            background: #1f1f2e;
         }
 
-        .search-result-item:last-child {
-            border-bottom: none;
+        .item-icon {
+            width: 40px;
+            height: 40px;
+            background: #2a2a3a;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .item-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .item-name {
+            font-weight: 600;
+            font-size: 16px;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .item-details {
+            font-size: 14px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .item-stats {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        /* Botón mostrar más */
+        .show-more-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 16px;
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #888;
+            transition: all 0.2s ease;
+        }
+
+        .show-more-btn:hover {
+            background: #1f1f2e;
+            border-color: #cba6f7;
+            color: #cba6f7;
+        }
+
+        /* Resultados de búsqueda */
+        .search-results {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .search-results.active {
+            display: block;
+        }
+
+        .artist-card {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .artist-card:hover {
+            border-color: #cba6f7;
+            box-shadow: 0 2px 12px rgba(203, 166, 247, 0.2);
+            background: #1f1f2e;
         }
 
         .artist-name {
-            font-weight: bold;
-            color: #333;
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
         }
 
-        .artist-info {
-            font-size: 12px;
-            color: #666;
-            margin-top: 4px;
-        }
-
-        .tabs {
+        .artist-stats {
             display: flex;
-            background: white;
+            gap: 20px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        /* Home sections grid */
+        .home-sections {
+            display: grid;
+            gap: 32px;
+        }
+
+        .home-section {
+            background: #1a1a24;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .home-section h3 {
+            color: #cba6f7;
+            margin-bottom: 16px;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        /* Loading y estados */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Estadísticas especiales */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: #1f1f2e;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #cba6f7;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #888;
+        }
+
+        /* Album cards para detalles de artista */
+        .albums-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .album-card {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
             border-radius: 10px;
-            margin-bottom: 20px;
-            overflow: hidden;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-
-        .tab {
-            flex: 1;
-            padding: 15px 20px;
-            background: #f8f9fa;
-            border: none;
+            padding: 15px;
+            text-align: center;
             cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s;
+            transition: all 0.2s ease;
         }
 
-        .tab.active {
-            background: #667eea;
-            color: white;
+        .album-card:hover {
+            border-color: #cba6f7;
+            box-shadow: 0 4px 12px rgba(203, 166, 247, 0.2);
+            transform: translateY(-2px);
         }
 
-        .tab:hover:not(.active) {
-            background: #e9ecef;
+        .album-cover {
+            width: 100%;
+            height: 150px;
+            background: #2a2a3a;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 2em;
         }
 
-        .content-area {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            min-height: 400px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        .album-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #fff;
         }
 
+        .album-year {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .album-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .download-btn {
+            background: #cba6f7;
+            color: #14141e;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .download-btn:hover {
+            background: #b794f6;
+            transform: translateY(-1px);
+        }
+
+        .download-btn:disabled {
+            background: #666;
+            color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Artist details */
         .artist-details {
             display: none;
+            color: #fff;
         }
 
         .artist-header {
@@ -156,7 +397,7 @@
             height: 200px;
             border-radius: 15px;
             object-fit: cover;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
         }
 
         .artist-info-detail {
@@ -166,140 +407,34 @@
         .artist-title {
             font-size: 2.5em;
             margin-bottom: 10px;
-            color: #333;
+            color: #cba6f7;
         }
 
         .artist-meta {
-            color: #666;
+            color: #888;
             margin-bottom: 20px;
         }
 
         .artist-bio {
             line-height: 1.6;
-            color: #555;
+            color: #ccc;
             margin-bottom: 20px;
         }
 
-        .albums-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 20px;
-            margin-top: 30px;
-        }
-
-        .album-card {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 15px;
-            text-align: center;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .album-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-        }
-
-        .album-cover {
-            width: 100%;
-            height: 150px;
-            background: #ddd;
-            border-radius: 8px;
-            margin-bottom: 10px;
+        .artist-image-placeholder {
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #999;
-            font-size: 12px;
-        }
-
-        .album-title {
-            font-weight: bold;
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-
-        .album-year {
+            background: #2a2a3a;
             color: #666;
-            font-size: 12px;
-        }
-
-        .folder-browser {
-            display: none;
-        }
-
-        .breadcrumb {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-
-        .folder-list {
-            list-style: none;
-        }
-
-        .folder-item {
-            padding: 12px 15px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .folder-item:hover {
-            background-color: #f8f9fa;
-        }
-
-        .folder-icon {
-            font-size: 16px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-        }
-
-        .stat-number {
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            opacity: 0.9;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
+            font-size: 3em;
+            width: 200px;
+            height: 200px;
+            border-radius: 15px;
         }
 
         .read-more-btn {
-            color: #667eea;
+            color: #cba6f7;
             cursor: pointer;
             text-decoration: underline;
             font-weight: bold;
@@ -307,48 +442,19 @@
         }
 
         .read-more-btn:hover {
-            color: #764ba2;
+            color: #b794f6;
         }
 
-        .bio-expanded {
-            max-height: none !important;
-        }
-
-        .album-actions {
-            margin-top: 10px;
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-        }
-
-        .download-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: background 0.2s;
-        }
-
-        .download-btn:hover {
-            background: #218838;
-        }
-
-        .download-btn:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-        }
-
+        /* Download status */
         .download-status {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: white;
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
             border-radius: 10px;
             padding: 15px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
             max-width: 300px;
             z-index: 2000;
             display: none;
@@ -361,46 +467,43 @@
         .download-item {
             margin-bottom: 10px;
             padding: 10px;
-            background: #f8f9fa;
+            background: #1f1f2e;
             border-radius: 5px;
         }
 
         .download-item.downloading {
-            border-left: 4px solid #ffc107;
+            border-left: 4px solid #ffd700;
         }
 
         .download-item.completed {
-            border-left: 4px solid #28a745;
+            border-left: 4px solid #cba6f7;
         }
 
         .download-item.error {
-            border-left: 4px solid #dc3545;
+            border-left: 4px solid #ff6b6b;
         }
 
-        .artist-image-placeholder {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #f0f0f0, #e0e0e0);
-            color: #999;
-            font-size: 3em;
-            width: 200px;
-            height: 200px;
-            border-radius: 15px;
-        }
-
-        .album-cover-placeholder {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #f0f0f0, #e0e0e0);
-            color: #999;
-            font-size: 2em;
-        }
-
+        /* Responsive */
         @media (max-width: 768px) {
-            .container {
-                padding: 10px;
+            .header {
+                padding: 12px 16px;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+
+            .search-container {
+                max-width: none;
+                order: 2;
+                width: 100%;
+            }
+
+            .nav-tabs {
+                order: 1;
+                flex-wrap: wrap;
+            }
+
+            .main-content {
+                padding: 16px;
             }
 
             .artist-header {
@@ -414,13 +517,15 @@
                 margin: 0 auto;
             }
 
+            .artist-image-placeholder {
+                width: 150px;
+                height: 150px;
+                font-size: 2em;
+            }
+
             .albums-grid {
                 grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
                 gap: 15px;
-            }
-
-            .tabs {
-                flex-direction: column;
             }
 
             .download-status {
@@ -428,130 +533,474 @@
                 top: 10px;
                 max-width: calc(100vw - 20px);
             }
-            
-            .artist-image-placeholder {
-                width: 150px;
-                height: 150px;
-                font-size: 2em;
-            }
+        }
+
+        /* Animaciones suaves */
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎵 Explorador de Música</h1>
-            <p>Explora tu colección de música local</p>
-        </header>
+    <!-- Header con búsqueda y tabs -->
+    <header class="header">
+        <div class="search-container">
+            <input 
+                type="text" 
+                class="search-input" 
+                placeholder="Buscar artistas..." 
+                id="searchInput"
+                autocomplete="off"
+            >
+        </div>
+        
+        <nav class="nav-tabs">
+            <button class="tab-button active" data-tab="home" title="Inicio">
+                🏠
+            </button>
+            <button class="tab-button" data-tab="folders" title="Explorar">
+                📁
+            </button>
+            <button class="tab-button" data-tab="stats" title="Estadísticas">
+                📊
+            </button>
+            <button class="tab-button" data-tab="downloads" title="Descargas">
+                📥
+            </button>
+        </nav>
+    </header>
 
-        <div class="search-section">
-            <div class="search-container">
-                <input type="text" id="artistSearch" placeholder="Buscar artistas..." autocomplete="off">
-                <div class="search-results" id="searchResults"></div>
+    <!-- Contenido principal -->
+    <main class="main-content">
+        <!-- Resultados de búsqueda -->
+        <div class="search-results" id="searchResults">
+            <div class="section-title">Resultados de búsqueda</div>
+            <div id="artistResults"></div>
+        </div>
+
+        <!-- Home - Combinación de todas las listas -->
+        <section class="content-section active" data-section="home">
+            <div class="home-sections">
+                <!-- Búsquedas recientes -->
+                <div class="home-section">
+                    <h3>🕒 Búsquedas recientes</h3>
+                    <div class="items-list" id="recentSearches">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔍</div>
+                            <div>Realiza una búsqueda para ver tu historial</div>
+                        </div>
+                    </div>
+                    <button class="show-more-btn" id="showMoreRecent" style="display: none;">
+                        Mostrar más búsquedas
+                    </button>
+                </div>
+
+                <!-- Más escuchados -->
+                <div class="home-section">
+                    <h3>🎵 Más escuchados</h3>
+                    <div class="items-list" id="popularList">
+                        <div class="loading">Cargando artistas populares...</div>
+                    </div>
+                    <button class="show-more-btn" id="showMorePopular" style="display: none;">
+                        Mostrar más artistas
+                    </button>
+                </div>
+
+                <!-- Más descargados -->
+                <div class="home-section">
+                    <h3>📥 Más descargados</h3>
+                    <div class="items-list" id="downloadsList">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📥</div>
+                            <div>Descarga algunos álbumes para ver estadísticas</div>
+                        </div>
+                    </div>
+                    <button class="show-more-btn" id="showMoreDownloads" style="display: none;">
+                        Mostrar más descargas
+                    </button>
+                </div>
             </div>
-        </div>
+        </section>
 
-        <div class="tabs">
-            <button class="tab active" onclick="showTab('overview')">Resumen</button>
-            <button class="tab" onclick="showTab('folders')">Explorar Carpetas</button>
-        </div>
+        <!-- Explorar carpetas -->
+        <section class="content-section" data-section="folders">
+            <div class="section-title">Explorar carpetas</div>
+            <div class="breadcrumb" id="breadcrumb" style="background: #1a1a24; color: #cba6f7; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;"></div>
+            <ul class="folder-list" id="folderList" style="list-style: none;"></ul>
+        </section>
 
-        <div class="content-area">
-            <!-- Resumen inicial -->
-            <div id="overview" class="tab-content">
+        <!-- Estadísticas -->
+        <section class="content-section" data-section="stats">
+            <div class="section-title">Estadísticas de la colección</div>
+            <div id="statsContent">
                 <div class="loading">Cargando estadísticas...</div>
             </div>
+        </section>
 
-            <!-- Explorador de carpetas -->
-            <div id="folders" class="tab-content folder-browser">
-                <div class="breadcrumb" id="breadcrumb"></div>
-                <ul class="folder-list" id="folderList"></ul>
+        <!-- Descargas activas -->
+        <section class="content-section" data-section="downloads">
+            <div class="section-title">Descargas activas</div>
+            <div id="activeDownloads">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📥</div>
+                    <div>No hay descargas activas</div>
+                </div>
             </div>
+        </section>
 
-            <!-- Detalles del artista -->
-            <div id="artistDetails" class="artist-details">
-                <!-- Se llenará dinámicamente -->
-            </div>
+        <!-- Detalles del artista -->
+        <div id="artistDetails" class="artist-details">
+            <!-- Se llenará dinámicamente -->
         </div>
-    </div>
+    </main>
 
     <div id="downloadStatusPanel" class="download-status"></div>
 
     <script>
-        let currentPath = '';
-        let searchTimeout;
+        // Estado de la aplicación
+        const state = {
+            currentTab: 'home',
+            recentSearches: JSON.parse(localStorage.getItem('recentSearches') || '[]'),
+            currentPath: ''
+        };
 
-        // Inicializar la aplicación
+        // Elementos DOM
+        const searchInput = document.getElementById('searchInput');
+        const searchResults = document.getElementById('searchResults');
+        const artistResults = document.getElementById('artistResults');
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const contentSections = document.querySelectorAll('.content-section');
+
+        // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
             loadStats();
-            setupSearch();
+            loadPopularArtists();
+            renderRecentSearches();
+            setupEventListeners();
         });
 
-        // Configurar búsqueda
-        function setupSearch() {
-            const searchInput = document.getElementById('artistSearch');
-            const searchResults = document.getElementById('searchResults');
-
+        // Event listeners
+        function setupEventListeners() {
+            // Búsqueda
+            let searchTimeout;
             searchInput.addEventListener('input', function() {
                 clearTimeout(searchTimeout);
                 const query = this.value.trim();
                 
-                if (query.length < 2) {
-                    searchResults.style.display = 'none';
-                    return;
-                }
-
-                searchTimeout = setTimeout(() => {
-                    searchArtists(query);
-                }, 300);
-            });
-
-            // Cerrar resultados al hacer clic fuera
-            document.addEventListener('click', function(e) {
-                if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
-                    searchResults.style.display = 'none';
+                if (query.length >= 2) {
+                    searchTimeout = setTimeout(() => searchArtists(query), 300);
+                    showSearchResults();
+                } else {
+                    hideSearchResults();
                 }
             });
+
+            // Tabs
+            tabButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const tab = this.dataset.tab;
+                    switchTab(tab);
+                });
+            });
+
+            // Botones mostrar más
+            document.getElementById('showMoreRecent')?.addEventListener('click', () => loadMoreRecent());
+            document.getElementById('showMorePopular')?.addEventListener('click', () => loadMorePopular());
+            document.getElementById('showMoreDownloads')?.addEventListener('click', () => loadMoreDownloads());
+        }
+
+        // Cambiar tab
+        function switchTab(tabName) {
+            state.currentTab = tabName;
+            
+            // Actualizar botones
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            
+            // Actualizar contenido
+            contentSections.forEach(section => section.classList.remove('active'));
+            document.querySelector(`[data-section="${tabName}"]`).classList.add('active');
+            
+            hideSearchResults();
+
+            // Cargar contenido específico según la tab
+            if (tabName === 'folders' && state.currentPath === '') {
+                loadFolders();
+            }
+        }
+
+        // Mostrar/ocultar resultados de búsqueda
+        function showSearchResults() {
+            searchResults.classList.add('active');
+            contentSections.forEach(section => section.style.display = 'none');
+        }
+
+        function hideSearchResults() {
+            searchResults.classList.remove('active');
+            contentSections.forEach(section => section.style.display = 'block');
         }
 
         // Buscar artistas
         async function searchArtists(query) {
             try {
+                artistResults.innerHTML = '<div class="loading">Buscando...</div>';
+                
                 const response = await fetch(`/api/search/artists?q=${encodeURIComponent(query)}`);
                 const artists = await response.json();
-                displaySearchResults(artists);
-            } catch (error) {
-                console.error('Error buscando artistas:', error);
-                showError('Error de conexión al buscar artistas');
-            }
-        }
+                
+                if (artists.length === 0) {
+                    artistResults.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔍</div>
+                            <div>No se encontraron artistas para "${query}"</div>
+                        </div>
+                    `;
+                    return;
+                }
 
-        // Mostrar resultados de búsqueda
-        function displaySearchResults(artists) {
-            const searchResults = document.getElementById('searchResults');
-            
-            if (artists.length === 0) {
-                searchResults.innerHTML = '<div class="search-result-item">No se encontraron artistas</div>';
-            } else {
-                searchResults.innerHTML = artists.map(artist => `
-                    <div class="search-result-item" onclick="selectArtist(${artist.id})">
+                // Añadir a búsquedas recientes
+                addToRecentSearches(query, artists[0]);
+
+                // Renderizar resultados
+                artistResults.innerHTML = artists.map(artist => `
+                    <div class="artist-card fade-in" data-artist-id="${artist.id}">
                         <div class="artist-name">${artist.name}</div>
-                        <div class="artist-info">
-                            ${artist.album_count} álbumes • ${artist.song_count} canciones
-                            ${artist.formed_year ? ` • ${artist.formed_year}` : ''}
+                        <div class="artist-stats">
+                            <span>📀 ${artist.album_count} álbumes</span>
+                            <span>🎵 ${artist.song_count} canciones</span>
+                            ${artist.formed_year ? `<span>📅 ${artist.formed_year}</span>` : ''}
                         </div>
                     </div>
                 `).join('');
+
+                // Event listeners para resultados
+                document.querySelectorAll('.artist-card').forEach(card => {
+                    card.addEventListener('click', function() {
+                        const artistId = this.dataset.artistId;
+                        selectArtist(artistId);
+                    });
+                });
+
+            } catch (error) {
+                console.error('Error buscando artistas:', error);
+                artistResults.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div>Error al buscar artistas</div>
+                    </div>
+                `;
             }
+        }
+
+        // Añadir a búsquedas recientes
+        function addToRecentSearches(query, artist) {
+            const recent = state.recentSearches.filter(item => item.query !== query);
+            recent.unshift({
+                query: query,
+                artist: artist.name,
+                timestamp: new Date().toISOString(),
+                id: artist.id
+            });
             
-            searchResults.style.display = 'block';
+            state.recentSearches = recent.slice(0, 50); // Máximo 50
+            localStorage.setItem('recentSearches', JSON.stringify(state.recentSearches));
+            renderRecentSearches();
+        }
+
+        // Renderizar búsquedas recientes
+        function renderRecentSearches() {
+            const container = document.getElementById('recentSearches');
+            if (!container) return;
+
+            const items = state.recentSearches.slice(0, 10); // Mostrar solo 10 inicialmente
+            
+            if (items.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔍</div>
+                        <div>Realiza una búsqueda para ver tu historial</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = items.map(item => `
+                <div class="item-card" data-artist-id="${item.id}">
+                    <div class="item-icon">🔍</div>
+                    <div class="item-info">
+                        <div class="item-name">${item.query}</div>
+                        <div class="item-details">${item.artist}</div>
+                    </div>
+                    <div class="item-stats">${formatTimeAgo(item.timestamp)}</div>
+                </div>
+            `).join('');
+
+            // Event listeners
+            container.querySelectorAll('.item-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    const artistId = this.dataset.artistId;
+                    selectArtist(artistId);
+                });
+            });
+
+            // Botón mostrar más
+            const showMoreBtn = document.getElementById('showMoreRecent');
+            if (showMoreBtn) {
+                showMoreBtn.style.display = items.length < state.recentSearches.length ? 'block' : 'none';
+            }
+        }
+
+        // Cargar más elementos de búsquedas recientes
+        function loadMoreRecent() {
+            const container = document.getElementById('recentSearches');
+            if (!container) return;
+            
+            const currentItems = container.querySelectorAll('.item-card').length;
+            const items = state.recentSearches.slice(0, currentItems + 10);
+            
+            container.innerHTML = items.map(item => `
+                <div class="item-card" data-artist-id="${item.id}">
+                    <div class="item-icon">🔍</div>
+                    <div class="item-info">
+                        <div class="item-name">${item.query}</div>
+                        <div class="item-details">${item.artist}</div>
+                    </div>
+                    <div class="item-stats">${formatTimeAgo(item.timestamp)}</div>
+                </div>
+            `).join('');
+
+            // Event listeners
+            container.querySelectorAll('.item-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    const artistId = this.dataset.artistId;
+                    selectArtist(artistId);
+                });
+            });
+
+            // Actualizar botón mostrar más
+            const showMoreBtn = document.getElementById('showMoreRecent');
+            if (showMoreBtn) {
+                showMoreBtn.style.display = items.length < state.recentSearches.length ? 'block' : 'none';
+            }
+        }
+
+        function loadMorePopular() {
+            // Implementar cuando tengas más datos de artistas populares
+            console.log('Cargar más populares');
+        }
+
+        function loadMoreDownloads() {
+            // Implementar cuando tengas estadísticas de descargas
+            console.log('Cargar más descargas');
+        }
+
+        // Cargar artistas populares
+        async function loadPopularArtists() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                const container = document.getElementById('popularList');
+                if (!container) return;
+
+                container.innerHTML = stats.top_artists.slice(0, 10).map(artist => `
+                    <div class="item-card" data-query="${artist.artist}">
+                        <div class="item-icon">🎵</div>
+                        <div class="item-info">
+                            <div class="item-name">${artist.artist}</div>
+                            <div class="item-details">Artista popular</div>
+                        </div>
+                        <div class="item-stats">${artist.plays} reproducciones</div>
+                    </div>
+                `).join('');
+
+                // Event listeners
+                container.querySelectorAll('.item-card').forEach(card => {
+                    card.addEventListener('click', function() {
+                        const query = this.dataset.query;
+                        searchInput.value = query;
+                        searchArtists(query);
+                        showSearchResults();
+                    });
+                });
+
+            } catch (error) {
+                console.error('Error cargando artistas populares:', error);
+                const container = document.getElementById('popularList');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">❌</div>
+                            <div>Error al cargar artistas populares</div>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Cargar estadísticas
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                document.getElementById('statsContent').innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.album_count.toLocaleString()}</div>
+                            <div class="stat-label">Álbumes</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.song_count.toLocaleString()}</div>
+                            <div class="stat-label">Canciones</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 32px;">
+                        <h3 style="color: #cba6f7; margin-bottom: 16px;">Top artistas por reproducciones</h3>
+                        <div class="items-list">
+                            ${stats.top_artists.map((artist, index) => `
+                                <div class="item-card" data-query="${artist.artist}">
+                                    <div class="item-icon">${index + 1}</div>
+                                    <div class="item-info">
+                                        <div class="item-name">${artist.artist}</div>
+                                        <div class="item-details">Artista</div>
+                                    </div>
+                                    <div class="item-stats">${artist.plays} reproducciones</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+
+                // Event listeners para los artistas en estadísticas
+                document.querySelectorAll('#statsContent .item-card').forEach(card => {
+                    card.addEventListener('click', function() {
+                        const query = this.dataset.query;
+                        searchInput.value = query;
+                        searchArtists(query);
+                        showSearchResults();
+                    });
+                });
+
+            } catch (error) {
+                console.error('Error cargando estadísticas:', error);
+                document.getElementById('statsContent').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div>Error al cargar estadísticas</div>
+                    </div>
+                `;
+            }
         }
 
         // Seleccionar artista
         async function selectArtist(artistId) {
-            document.getElementById('searchResults').style.display = 'none';
-            document.getElementById('artistSearch').value = '';
-            
             try {
                 const response = await fetch(`/api/artist/${artistId}`);
                 const data = await response.json();
@@ -569,12 +1018,78 @@
             }
         }
 
+        // Función para generar URL de imagen
+        function getImageUrl(imagePath) {
+            if (!imagePath) return null;
+            
+            // Si ya es una URL completa, devolverla tal como está
+            if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+                return imagePath;
+            }
+            
+            // Si es una ruta local, usar nuestro endpoint de imágenes
+            return `/api/image/${encodeURIComponent(imagePath)}`;
+        }
+
+        // Función para crear elemento de imagen con fallback
+        function createImageElement(imagePath, altText, className, fallbackIcon = '🎵') {
+            if (!imagePath) {
+                return `<div class="${className}-placeholder">${fallbackIcon}</div>`;
+            }
+            
+            const imageUrl = getImageUrl(imagePath);
+            return `
+                <img src="${imageUrl}" alt="${altText}" class="${className}" 
+                     onerror="handleImageError(this, '${fallbackIcon}')"
+                     onload="handleImageLoad(this)">
+                <div class="${className}-placeholder" style="display: none;">${fallbackIcon}</div>
+            `;
+        }
+
+        // Manejar errores de carga de imagen
+        function handleImageError(img, fallbackIcon) {
+            console.log('Error cargando imagen:', img.src);
+            img.style.display = 'none';
+            const placeholder = img.nextElementSibling;
+            if (placeholder) {
+                placeholder.style.display = 'flex';
+                placeholder.innerHTML = fallbackIcon;
+            }
+        }
+
+        // Manejar carga exitosa de imagen
+        function handleImageLoad(img) {
+            console.log('Imagen cargada correctamente:', img.src);
+            const placeholder = img.nextElementSibling;
+            if (placeholder) {
+                placeholder.style.display = 'none';
+            }
+        }
+
+        // Función de debug para imágenes
+        async function debugArtistImages(artistId) {
+            try {
+                const response = await fetch(`/api/artist/${artistId}/debug`);
+                const debugInfo = await response.json();
+                console.log('Debug de imágenes:', debugInfo);
+                return debugInfo;
+            } catch (error) {
+                console.error('Error en debug de imágenes:', error);
+                return null;
+            }
+        }
+
         // Mostrar detalles del artista
         function displayArtistDetails(data) {
             const artist = data.artist;
             const albums = data.albums;
             
             const artistDetails = document.getElementById('artistDetails');
+            
+            // Debug de imágenes (solo en desarrollo)
+            if (window.location.hostname === 'localhost') {
+                debugArtistImages(artist.id);
+            }
             
             // Limpiar bio de HTML si existe
             const cleanBio = artist.bio ? artist.bio.replace(/<[^>]*>/g, '') : '';
@@ -600,10 +1115,7 @@
             }
             
             // Crear HTML para imagen del artista
-            const artistImageHtml = artist.img ? 
-                `<img src="${artist.img}" alt="${artist.name}" class="artist-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                <div class="artist-image-placeholder" style="display: none;">🎤</div>` :
-                `<div class="artist-image-placeholder">🎤</div>`;
+            const artistImageHtml = createImageElement(artist.img, artist.name, 'artist-image', '🎤');
             
             artistDetails.innerHTML = `
                 <div class="artist-header">
@@ -621,15 +1133,16 @@
                     </div>
                 </div>
                 
-                <h3>Discografía (${albums.length} álbumes)</h3>
+                <h3 style="color: #cba6f7; margin-bottom: 20px;">Discografía (${albums.length} álbumes)</h3>
                 <div class="albums-grid">
                     ${albums.map(album => `
                         <div class="album-card">
                             <div class="album-cover" onclick="selectAlbum(${album.id})">
-                                ${album.album_art_path ? 
-                                    `<img src="${album.album_art_path}" alt="${album.name}" 
+                                ${album.best_album_art ? 
+                                    `<img src="${getImageUrl(album.best_album_art)}" alt="${album.name}" 
                                         style="width:100%;height:100%;object-fit:cover;border-radius:8px;"
-                                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                        onerror="handleImageError(this, '🎵')"
+                                        onload="handleImageLoad(this)">
                                     <div class="album-cover-placeholder" style="display: none;">🎵</div>` :
                                     `<div class="album-cover-placeholder">🎵</div>`
                                 }
@@ -653,6 +1166,8 @@
                 artist: artist,
                 fullBio: wikipediaContent || cleanBio || ''
             };
+
+            hideSearchResults();
         }
 
         // Toggle biografía completa
@@ -675,6 +1190,111 @@
                     '<span class="read-more-btn" onclick="toggleBio()">Leer menos</span>';
                 bioElement.classList.add('bio-expanded');
             }
+        }
+
+        // Mostrar tab específico (incluyendo artist)
+        function showTab(tabName) {
+            // Ocultar todos los contenidos
+            document.querySelectorAll('.content-section').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            document.querySelectorAll('.artist-details').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            // Remover clase active de todas las pestañas
+            document.querySelectorAll('.tab-button').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Mostrar contenido seleccionado
+            if (tabName === 'artist') {
+                document.getElementById('artistDetails').style.display = 'block';
+                // No activar ninguna pestaña para vista de artista
+            } else {
+                const tabElement = document.querySelector(`[data-section="${tabName}"]`);
+                if (tabElement) {
+                    tabElement.style.display = 'block';
+                }
+                
+                const buttonElement = document.querySelector(`[data-tab="${tabName}"]`);
+                if (buttonElement) {
+                    buttonElement.classList.add('active');
+                }
+            }
+        }
+
+        // Cargar carpetas
+        async function loadFolders(path = '') {
+            try {
+                const response = await fetch(`/api/folders?path=${encodeURIComponent(path)}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                displayFolders(data);
+                state.currentPath = path;
+            } catch (error) {
+                console.error('Error cargando carpetas:', error);
+                showError('Error cargando la estructura de carpetas');
+            }
+        }
+
+        // Mostrar estructura de carpetas
+        function displayFolders(data) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            const folderList = document.getElementById('folderList');
+            
+            // Breadcrumb
+            const pathParts = data.current_path ? data.current_path.split('/') : [];
+            let breadcrumbHtml = '<a href="#" onclick="loadFolders(\'\')">🏠 Inicio</a>';
+            
+            let currentPathBuild = '';
+            pathParts.forEach(part => {
+                if (part) {
+                    currentPathBuild += (currentPathBuild ? '/' : '') + part;
+                    breadcrumbHtml += ` / <a href="#" onclick="loadFolders('${currentPathBuild}')" style="color: #cba6f7;">${part}</a>`;
+                }
+            });
+            
+            breadcrumb.innerHTML = breadcrumbHtml;
+            
+            // Lista de carpetas
+            let foldersHtml = '';
+            
+            // Botón para subir nivel
+            if (data.parent_path !== null) {
+                foldersHtml += `
+                    <li class="item-card" onclick="loadFolders('${data.parent_path}')" style="list-style: none;">
+                        <div class="item-icon">📁</div>
+                        <div class="item-info">
+                            <div class="item-name">.. (Subir nivel)</div>
+                        </div>
+                    </li>
+                `;
+            }
+            
+            // Carpetas
+            data.items.forEach(item => {
+                foldersHtml += `
+                    <li class="item-card" onclick="loadFolders('${item.path}')" style="list-style: none;">
+                        <div class="item-icon">📁</div>
+                        <div class="item-info">
+                            <div class="item-name">${item.name}</div>
+                        </div>
+                    </li>
+                `;
+            });
+            
+            if (data.items.length === 0 && data.parent_path === null) {
+                foldersHtml = '<li style="list-style: none;"><div class="empty-state"><div class="empty-state-icon">📁</div><div>No hay carpetas disponibles</div></div></li>';
+            }
+            
+            folderList.innerHTML = foldersHtml;
         }
 
         // Descargar álbum
@@ -725,10 +1345,10 @@
                     if (status.status === 'downloading') {
                         button.innerHTML = '📥 Descargando...';
                         showDownloadStatus(`Descargando: ${status.album_name}`, 'downloading');
-                        setTimeout(checkStatus, 2000); // Verificar cada 2 segundos
+                        setTimeout(checkStatus, 2000);
                     } else if (status.status === 'completed') {
                         button.innerHTML = '✅ Completado';
-                        button.style.background = '#28a745';
+                        button.style.background = '#cba6f7';
                         showDownloadStatus(`✅ Completado: ${status.album_name}`, 'completed');
                         setTimeout(() => {
                             button.disabled = false;
@@ -738,7 +1358,7 @@
                     } else if (status.status === 'error') {
                         button.disabled = false;
                         button.innerHTML = '❌ Error';
-                        button.style.background = '#dc3545';
+                        button.style.background = '#ff6b6b';
                         showDownloadStatus(`❌ Error: ${status.message}`, 'error');
                         setTimeout(() => {
                             button.innerHTML = '📥 Descargar';
@@ -752,12 +1372,11 @@
                 }
             };
             
-            setTimeout(checkStatus, 1000); // Comenzar a verificar después de 1 segundo
+            setTimeout(checkStatus, 1000);
         }
 
         // Mostrar estado de descarga
         function showDownloadStatus(message, type = 'info') {
-            // Crear o actualizar panel de estado
             let statusPanel = document.getElementById('downloadStatusPanel');
             if (!statusPanel) {
                 statusPanel = document.createElement('div');
@@ -772,8 +1391,8 @@
             const statusItem = document.createElement('div');
             statusItem.className = `download-item ${statusClass}`;
             statusItem.innerHTML = `
-                <div style="font-weight: bold; margin-bottom: 5px;">${message}</div>
-                <div style="font-size: 12px; color: #666;">${timestamp}</div>
+                <div style="font-weight: bold; margin-bottom: 5px; color: #fff;">${message}</div>
+                <div style="font-size: 12px; color: #888;">${timestamp}</div>
             `;
             
             statusPanel.appendChild(statusItem);
@@ -799,161 +1418,47 @@
             // Aquí puedes implementar la vista de detalles del álbum
         }
 
-        // Cargar estadísticas
-        async function loadStats() {
-            try {
-                const response = await fetch('/api/stats');
-                const stats = await response.json();
-                
-                if (stats.error) {
-                    showError(stats.error);
-                    return;
-                }
-                
-                displayStats(stats);
-            } catch (error) {
-                console.error('Error cargando estadísticas:', error);
-                showError('Error cargando las estadísticas');
-            }
-        }
+        // Formatear tiempo relativo
+        function formatTimeAgo(timestamp) {
+            const now = new Date();
+            const date = new Date(timestamp);
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
 
-        // Mostrar estadísticas
-        function displayStats(stats) {
-            const overview = document.getElementById('overview');
-            
-            overview.innerHTML = `
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-number">${stats.artist_count}</div>
-                        <div class="stat-label">Artistas</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">${stats.album_count}</div>
-                        <div class="stat-label">Álbumes</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">${stats.song_count}</div>
-                        <div class="stat-label">Canciones</div>
-                    </div>
-                </div>
-                
-                <h3>Artistas más escuchados</h3>
-                <div style="margin-top: 20px;">
-                    ${stats.top_artists.map((artist, index) => `
-                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;">
-                            <span>${index + 1}. ${artist.artist}</span>
-                            <span>${artist.plays} reproducciones</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-
-        // Cargar estructura de carpetas
-        async function loadFolders(path = '') {
-            try {
-                const response = await fetch(`/api/folders?path=${encodeURIComponent(path)}`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    showError(data.error);
-                    return;
-                }
-                
-                displayFolders(data);
-                currentPath = path;
-            } catch (error) {
-                console.error('Error cargando carpetas:', error);
-                showError('Error cargando la estructura de carpetas');
-            }
-        }
-
-        // Mostrar estructura de carpetas
-        function displayFolders(data) {
-            const breadcrumb = document.getElementById('breadcrumb');
-            const folderList = document.getElementById('folderList');
-            
-            // Breadcrumb
-            const pathParts = data.current_path ? data.current_path.split('/') : [];
-            let breadcrumbHtml = '<a href="#" onclick="loadFolders(\'\')">🏠 Inicio</a>';
-            
-            let currentPathBuild = '';
-            pathParts.forEach(part => {
-                if (part) {
-                    currentPathBuild += (currentPathBuild ? '/' : '') + part;
-                    breadcrumbHtml += ` / <a href="#" onclick="loadFolders('${currentPathBuild}')">${part}</a>`;
-                }
-            });
-            
-            breadcrumb.innerHTML = breadcrumbHtml;
-            
-            // Lista de carpetas
-            let foldersHtml = '';
-            
-            // Botón para subir nivel
-            if (data.parent_path !== null) {
-                foldersHtml += `
-                    <li class="folder-item" onclick="loadFolders('${data.parent_path}')">
-                        <span class="folder-icon">📁</span>
-                        <span>.. (Subir nivel)</span>
-                    </li>
-                `;
-            }
-            
-            // Carpetas
-            data.items.forEach(item => {
-                foldersHtml += `
-                    <li class="folder-item" onclick="loadFolders('${item.path}')">
-                        <span class="folder-icon">📁</span>
-                        <span>${item.name}</span>
-                    </li>
-                `;
-            });
-            
-            if (data.items.length === 0) {
-                foldersHtml = '<li class="folder-item">No hay carpetas en esta ubicación</li>';
-            }
-            
-            folderList.innerHTML = foldersHtml;
-        }
-
-        // Cambiar pestañas
-        function showTab(tabName) {
-            // Ocultar todos los contenidos
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.style.display = 'none';
-            });
-            
-            document.querySelectorAll('.artist-details').forEach(content => {
-                content.style.display = 'none';
-            });
-            
-            // Remover clase active de todas las pestañas
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            // Mostrar contenido seleccionado
-            if (tabName === 'overview') {
-                document.getElementById('overview').style.display = 'block';
-                document.querySelector('.tab:nth-child(1)').classList.add('active');
-            } else if (tabName === 'folders') {
-                document.getElementById('folders').style.display = 'block';
-                document.querySelector('.tab:nth-child(2)').classList.add('active');
-                if (currentPath === '') {
-                    loadFolders();
-                }
-            } else if (tabName === 'artist') {
-                document.getElementById('artistDetails').style.display = 'block';
-                // No activar ninguna pestaña para vista de artista
-            }
+            if (diffMins < 1) return 'Ahora';
+            if (diffMins < 60) return `${diffMins}m`;
+            if (diffHours < 24) return `${diffHours}h`;
+            if (diffDays < 7) return `${diffDays}d`;
+            return date.toLocaleDateString();
         }
 
         // Mostrar errores
         function showError(message) {
-            const contentArea = document.querySelector('.content-area');
-            contentArea.innerHTML = `<div class="error">Error: ${message}</div>`;
+            const contentArea = document.querySelector('.main-content');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'empty-state';
+            errorDiv.innerHTML = `
+                <div class="empty-state-icon">❌</div>
+                <div>Error: ${message}</div>
+            `;
+            contentArea.prepend(errorDiv);
+            
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
         }
+
+        // Hacer las funciones globales para onclick
+        window.toggleBio = toggleBio;
+        window.downloadAlbum = downloadAlbum;
+        window.selectAlbum = selectAlbum;
+        window.loadFolders = loadFolders;
+        window.selectArtist = selectArtist;
+        window.handleImageError = handleImageError;
+        window.handleImageLoad = handleImageLoad;
+        window.debugArtistImages = debugArtistImages;
     </script>
 </body>
 </html>
