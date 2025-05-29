@@ -283,6 +283,20 @@ class MusicExplorer:
             conn.close()
             return {'error': str(e)}
 
+
+    def get_system_user(self):
+        """Obtener el usuario del sistema desde configuración o variable de entorno"""
+        # Prioridad: config.ini > variable de entorno > por defecto
+        config_user = self.config.get('system', 'user', fallback=None)
+        if config_user:
+            return config_user
+        
+        env_user = os.environ.get('USER')
+        if env_user:
+            return env_user
+        
+        return 'dietpi'  # Usuario por defecto
+
 # Crear instancia de la aplicación Flask
 app = Flask(__name__)
 
@@ -383,7 +397,7 @@ def get_stats():
 
 @app.route('/api/album/<int:album_id>/download', methods=['POST'])
 def download_album(album_id):
-    """Endpoint para descargar álbum - VERSIÓN UNIFICADA"""
+    """Endpoint para descargar álbum - VERSIÓN CON DEBUG DETALLADO"""
     
     # Verificar que el álbum existe y obtener información
     conn = explorer.get_db_connection()
@@ -427,7 +441,10 @@ def download_album(album_id):
         download_id = f"album_{album_id}_{int(time_module.time())}"
         
         # Logging para debug
-        explorer.logger.info(f"Descarga solicitada - Álbum: {album['name']}, Artista: {album['artist_name']}, Ruta: {album_path}")
+        explorer.logger.info(f"=== INICIO DESCARGA DEBUG ===")
+        explorer.logger.info(f"Álbum: {album['name']}, Artista: {album['artist_name']}")
+        explorer.logger.info(f"Ruta remota: {album_path}")
+        explorer.logger.info(f"Download ID: {download_id}")
         
         # Iniciar descarga en hilo separado
         def perform_download():
@@ -440,78 +457,210 @@ def download_album(album_id):
                     'artist_name': album['artist_name']
                 }
                 
-                # Configuración SSH desde config
+                # DEBUG: Información del entorno actual
+                explorer.logger.info(f"=== DEBUG ENTORNO ===")
+                explorer.logger.info(f"Usuario actual (whoami): {os.getenv('USER', 'UNKNOWN')}")
+                explorer.logger.info(f"UID del proceso: {os.getuid()}")
+                explorer.logger.info(f"GID del proceso: {os.getgid()}")
+                explorer.logger.info(f"HOME actual: {os.getenv('HOME', 'UNKNOWN')}")
+                explorer.logger.info(f"PATH actual: {os.getenv('PATH', 'UNKNOWN')}")
+                
+                # Configuración desde config.ini
                 ssh_host = explorer.config.get('download', 'ssh_host', fallback='pepecono')
-                ssh_user = explorer.config.get('download', 'ssh_user', fallback='dietpi')
+                ssh_user = explorer.config.get('download', 'ssh_user', fallback='pepe')
+                
+                explorer.logger.info(f"SSH Host: {ssh_host}")
+                explorer.logger.info(f"SSH User: {ssh_user}")
+                
+                # OBTENER USUARIO DEL CONTENEDOR
+                container_user = os.getenv('USER', 'musicapp')  # Usar musicapp por defecto
+                container_uid = os.getenv('CONTAINER_UID', '1000')
+                
+                explorer.logger.info(f"Usuario del contenedor (env): {container_user} (UID: {container_uid})")
+                
+                # Determinar el directorio home del usuario
+                import pwd
+                try:
+                    user_info = pwd.getpwnam(container_user)
+                    user_home = user_info.pw_dir
+                    explorer.logger.info(f"Home del usuario {container_user}: {user_home}")
+                except Exception as e:
+                    user_home = f"/home/{container_user}"
+                    explorer.logger.warning(f"No se pudo obtener info del usuario {container_user}: {e}, usando {user_home}")
+                
+                # Buscar clave SSH
+                ssh_key_path = None
+                possible_key_paths = [
+                    f"{user_home}/.ssh/pepecono",
+                    f"{user_home}/.ssh/id_rsa",
+                    f"{user_home}/.ssh/id_ed25519"
+                ]
+                
+                explorer.logger.info(f"Buscando claves SSH en:")
+                for key_path in possible_key_paths:
+                    exists = os.path.exists(key_path)
+                    readable = os.access(key_path, os.R_OK) if exists else False
+                    explorer.logger.info(f"  {key_path}: exists={exists}, readable={readable}")
+                    if exists and readable:
+                        ssh_key_path = key_path
+                        break
+                
+                if not ssh_key_path:
+                    error_msg = f"No se encontró clave SSH válida para usuario {container_user}"
+                    explorer.logger.error(error_msg)
+                    raise Exception(error_msg)
+                
+                explorer.logger.info(f"✅ Usando clave SSH: {ssh_key_path}")
                 
                 # Crear directorio de destino
                 dest_path = Path(explorer.download_path) / album['artist_name'] / album['name']
                 dest_path.mkdir(parents=True, exist_ok=True)
+                explorer.logger.info(f"Directorio destino: {dest_path}")
                 
-                # Comando rsync como usuario dietpi
+                # Verificar permisos del directorio destino
+                dest_writable = os.access(dest_path, os.W_OK)
+                explorer.logger.info(f"Directorio destino escribible: {dest_writable}")
+                
+                # Comando rsync básico primero (sin sudo)
                 rsync_cmd = [
                     'rsync',
                     '-avzh',
                     '--progress',
+                    '-e', f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no -o ConnectTimeout=10',
                     f"{ssh_user}@{ssh_host}:{album_path}/",
                     str(dest_path) + "/"
                 ]
                 
-                explorer.logger.info(f"Ejecutando descarga como {os.getenv('USER', 'unknown')}: {' '.join(rsync_cmd)}")
+                explorer.logger.info(f"=== COMANDO RSYNC ===")
+                explorer.logger.info(f"Comando: {' '.join(rsync_cmd)}")
                 
-                # Ejecutar rsync con el usuario actual (dietpi)
+                # Probar primero test de conectividad SSH
+                test_ssh_cmd = [
+                    'ssh',
+                    '-i', ssh_key_path,
+                    '-o', 'StrictHostKeyChecking=no',
+                    '-o', 'ConnectTimeout=10',
+                    f"{ssh_user}@{ssh_host}",
+                    'echo "SSH_TEST_OK"'
+                ]
+                explorer.logger.info(f"=== TEST SSH ===")
+                explorer.logger.info(f"Comando test: {' '.join(test_ssh_cmd)}")
+                
+                # Ejecutar test SSH
+                test_process = subprocess.Popen(
+                    test_ssh_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env={
+                        'HOME': user_home,
+                        'USER': container_user,
+                        'PATH': os.environ.get('PATH', '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin')
+                    }
+                )
+                
+                test_stdout, test_stderr = test_process.communicate(timeout=15)
+                explorer.logger.info(f"Test SSH stdout: {test_stdout}")
+                explorer.logger.info(f"Test SSH stderr: {test_stderr}")
+                explorer.logger.info(f"Test SSH return code: {test_process.returncode}")
+                
+                if test_process.returncode != 0:
+                    error_msg = f"Test SSH falló: {test_stderr}"
+                    explorer.logger.error(error_msg)
+                    raise Exception(error_msg)
+                
+                # Si el test SSH pasa, ejecutar rsync
+                explorer.logger.info("✅ Test SSH exitoso, iniciando rsync...")
+                
+                # Ejecutar rsync
                 process = subprocess.Popen(
                     rsync_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    env={
+                        'HOME': user_home,
+                        'USER': container_user,
+                        'PATH': os.environ.get('PATH', '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin')
+                    }
                 )
                 
                 # Monitorear progreso
+                stdout_lines = []
+                stderr_lines = []
+                
                 while True:
                     output = process.stdout.readline()
                     if output == '' and process.poll() is not None:
                         break
                     
                     if output:
-                        download_status[download_id]['message'] = output.strip()
-                        explorer.logger.info(f"Descarga {download_id}: {output.strip()}")
+                        line = output.strip()
+                        stdout_lines.append(line)
+                        download_status[download_id]['message'] = line
+                        explorer.logger.info(f"rsync stdout: {line}")
+                
+                # Capturar stderr
+                stderr_output = process.stderr.read()
+                if stderr_output:
+                    stderr_lines.append(stderr_output)
+                    explorer.logger.info(f"rsync stderr: {stderr_output}")
                 
                 # Verificar resultado
                 return_code = process.poll()
-                stderr_output = process.stderr.read()
+                explorer.logger.info(f"rsync return code: {return_code}")
                 
                 if return_code == 0:
+                    # Verificar si realmente se descargó algo
+                    downloaded_files = list(dest_path.rglob('*'))
+                    file_count = len([f for f in downloaded_files if f.is_file()])
+                    
+                    explorer.logger.info(f"Archivos descargados: {file_count}")
+                    explorer.logger.info(f"Contenido del directorio: {[str(f) for f in downloaded_files[:10]]}")  # Solo los primeros 10
+                    
                     download_status[download_id] = {
                         'status': 'completed',
                         'progress': 100,
-                        'message': f'Álbum "{album["name"]}" descargado exitosamente',
+                        'message': f'Álbum "{album["name"]}" descargado exitosamente ({file_count} archivos)',
                         'album_name': album['name'],
                         'artist_name': album['artist_name'],
-                        'download_path': str(dest_path)
+                        'download_path': str(dest_path),
+                        'file_count': file_count
                     }
-                    explorer.logger.info(f"Descarga completada: {download_id}")
+                    explorer.logger.info(f"✅ Descarga completada: {download_id}")
                 else:
+                    all_stderr = '\n'.join(stderr_lines)
                     download_status[download_id] = {
                         'status': 'error',
                         'progress': 0,
-                        'message': f'Error en descarga: {stderr_output}',
+                        'message': f'Error en descarga (código {return_code}): {all_stderr}',
                         'album_name': album['name'],
                         'artist_name': album['artist_name']
                     }
-                    explorer.logger.error(f"Error en descarga {download_id}: {stderr_output}")
+                    explorer.logger.error(f"❌ Error en descarga {download_id} (código {return_code}): {all_stderr}")
                     
-            except Exception as e:
+            except subprocess.TimeoutExpired as e:
+                error_msg = f'Timeout en descarga: {str(e)}'
                 download_status[download_id] = {
                     'status': 'error',
                     'progress': 0,
-                    'message': f'Error interno: {str(e)}',
+                    'message': error_msg,
                     'album_name': album.get('name', 'Desconocido'),
                     'artist_name': album.get('artist_name', 'Desconocido')
                 }
-                explorer.logger.error(f"Excepción en descarga {download_id}: {e}")
+                explorer.logger.error(f"❌ Timeout en descarga {download_id}: {e}")
+            except Exception as e:
+                error_msg = f'Error interno: {str(e)}'
+                download_status[download_id] = {
+                    'status': 'error',
+                    'progress': 0,
+                    'message': error_msg,
+                    'album_name': album.get('name', 'Desconocido'),
+                    'artist_name': album.get('artist_name', 'Desconocido')
+                }
+                explorer.logger.error(f"❌ Excepción en descarga {download_id}: {e}")
         
         # Iniciar descarga en hilo separado
         download_thread = threading.Thread(target=perform_download)

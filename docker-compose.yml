@@ -4,28 +4,30 @@ services:
     container_name: music-web-explorer
     ports:
       - "8447:80"        # Nginx web server
-      - "5157:5157"    # Flask API directa (opcional)
+      - "5157:5157"      # Flask API directa (opcional)
     volumes:
-      # Base de datos (ajusta la ruta según tu ubicación)
-      - /home/dietpi/contenedores/mfuzz/musica.sqlite:/app/data/musica.sqlite:ro
-
+      # Base de datos (solo lectura)
+      - /home/huan/gits/pollo/music-fuzzy/db/sqlite/musica.sqlite:/app/data/musica.sqlite:ro
       
       # Directorio de descargas (persistente)
-      - /mnt/dietpi_userdata/suarez_mula/musica:/downloads
+      - /home/huan/Musica:/downloads
       
       # Logs (persistente)
-      - /home/dietpi/contenedores/mfuzz/logs:/app/logs
+      - /home/huan/contenedores/mfuzz/logs:/app/logs
       
-      # Configuración SSH (opcional, para descargas SSH)
-      - /home/dietpi/.ssh:/root/.ssh:ro
+      # Configuración SSH (clave específica para servidor remoto)
+      # El entrypoint copiará la clave específica desde la ruta del config
+      - /home/huan/.ssh:/tmp/host_ssh:ro
       
       # Configuración personalizada (opcional)
-      - /home/dietpi/contenedores/mfuzz/config.ini:/app/config.ini:ro
+      - /home/huan/gits/pollo/mfuzz_docker_web/config.ini:/app/config.ini:ro
     
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Madrid
-      - USER=dietpi
+      # UID/GID del usuario en el contenedor (sobrescriben config.ini)
+      - PUID=1000
+      - PGID=1000
 
     restart: unless-stopped
     
