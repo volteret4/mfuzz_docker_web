@@ -805,6 +805,7 @@
 
         // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
+            AppHistory.init();
             loadStats();
             loadPopularArtists();
             renderRecentSearches();
@@ -841,17 +842,54 @@
             document.getElementById('showMoreDownloads')?.addEventListener('click', () => loadMoreDownloads());
         }
 
+        function handleDirectLinks() {
+            const path = window.location.pathname;
+            const parts = path.split('/').filter(p => p);
+            
+            if (parts.length === 0) {
+                // Página principal
+                AppHistory.goToHome(false);
+            } else if (parts[0] === 'artist' && parts[1]) {
+                // Enlace directo a artista
+                const artistId = parseInt(parts[1]);
+                if (!isNaN(artistId)) {
+                    selectArtist(artistId);
+                }
+            } else if (parts[0] === 'album' && parts[1]) {
+                // Enlace directo a álbum
+                const albumId = parseInt(parts[1]);
+                if (!isNaN(albumId)) {
+                    selectAlbum(albumId);
+                }
+            } else if (parts[0] === 'song' && parts[1]) {
+                // Enlace directo a canción
+                const songId = parseInt(parts[1]);
+                if (!isNaN(songId)) {
+                    selectSong(songId);
+                }
+            } else {
+                // Otras pestañas
+                switchTab(parts[0]);
+            }
+        }
+
         // Cambiar tab
         function switchTab(tabName) {
             state.currentTab = tabName;
             
             // Actualizar botones
             tabButtons.forEach(btn => btn.classList.remove('active'));
-            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            const activeButton = document.querySelector(`[data-tab="${tabName}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
             
             // Actualizar contenido
             contentSections.forEach(section => section.classList.remove('active'));
-            document.querySelector(`[data-section="${tabName}"]`).classList.add('active');
+            const activeSection = document.querySelector(`[data-section="${tabName}"]`);
+            if (activeSection) {
+                activeSection.classList.add('active');
+            }
             
             hideSearchResults();
 
@@ -859,7 +897,13 @@
             if (tabName === 'folders' && state.currentPath === '') {
                 loadFolders();
             }
+            
+            // Añadir al historial solo si no es una vista de detalle
+            if (!['artist', 'album', 'song'].includes(tabName)) {
+                AppHistory.pushState(tabName, null, `${getTabTitle(tabName)} - Music Explorer`);
+            }
         }
+
 
         // Mostrar/ocultar resultados de búsqueda
         function showSearchResults() {
@@ -892,6 +936,9 @@
 
                 // Añadir a búsquedas recientes
                 addToRecentSearches(query, artists[0]);
+                
+                // Añadir al historial
+                AppHistory.pushState('search', { query, results: artists }, `Búsqueda: ${query} - Music Explorer`);
 
                 // Renderizar resultados
                 artistResults.innerHTML = artists.map(artist => `
@@ -1139,6 +1186,10 @@
                 
                 displayArtistDetails(data);
                 showTab('artist');
+                
+                // Añadir al historial
+                AppHistory.pushState('artist', data, `${data.artist.name} - Music Explorer`);
+                
             } catch (error) {
                 console.error('Error obteniendo detalles del artista:', error);
                 showError('Error cargando los detalles del artista');
@@ -1588,6 +1639,10 @@
                 
                 displayAlbumDetails(data);
                 showTab('album');
+                
+                // Añadir al historial
+                AppHistory.pushState('album', data, `${data.album.name} - ${data.album.artist_name} - Music Explorer`);
+                
             } catch (error) {
                 console.error('Error obteniendo detalles del álbum:', error);
                 showError('Error cargando los detalles del álbum');
@@ -1734,6 +1789,10 @@
                 
                 displaySongDetails(data);
                 showTab('song');
+                
+                // Añadir al historial
+                AppHistory.pushState('song', data, `${data.title} - ${data.artist} - Music Explorer`);
+                
             } catch (error) {
                 console.error('Error obteniendo detalles de la canción:', error);
                 showError('Error cargando los detalles de la canción');
@@ -1872,6 +1931,7 @@
             if (window.currentArtistData) {
                 displayArtistDetails(window.currentArtistData);
                 showTab('artist');
+                AppHistory.pushState('artist', window.currentArtistData, `${window.currentArtistData.artist.name} - Music Explorer`);
             }
         }
 
@@ -1879,6 +1939,7 @@
             if (window.currentAlbumData) {
                 displayAlbumDetails(window.currentAlbumData);
                 showTab('album');
+                AppHistory.pushState('album', window.currentAlbumData, `${window.currentAlbumData.album.name} - ${window.currentAlbumData.album.artist_name} - Music Explorer`);
             }
         }
 
@@ -1916,6 +1977,115 @@
                     buttonElement.classList.add('active');
                 }
             }
+
+
+        // GESTIÓN DEL HISTORIAL DEL NAVEGADOR
+        const AppHistory = {
+            currentState: {
+                view: 'home',
+                data: null
+            },
+            
+            // Inicializar gestión del historial
+            init() {
+                // Manejar evento popstate (botón atrás/adelante)
+                window.addEventListener('popstate', (event) => {
+                    if (event.state) {
+                        this.restoreState(event.state);
+                    } else {
+                        // Si no hay estado, volver al home
+                        this.goToHome(false);
+                    }
+                });
+                
+                // Estado inicial
+                this.pushState('home', null, 'Music Explorer');
+            },
+            
+            // Añadir nuevo estado al historial
+            pushState(view, data, title) {
+                const state = { view, data, timestamp: Date.now() };
+                this.currentState = state;
+                
+                let url = '/';
+                if (view === 'artist' && data?.artist?.id) {
+                    url = `/artist/${data.artist.id}`;
+                } else if (view === 'album' && data?.album?.id) {
+                    url = `/album/${data.album.id}`;
+                } else if (view === 'song' && data?.id) {
+                    url = `/song/${data.id}`;
+                } else if (view !== 'home') {
+                    url = `/${view}`;
+                }
+                
+                history.pushState(state, title, url);
+                document.title = title;
+            },
+            
+            // Restaurar estado desde el historial
+            restoreState(state) {
+                console.log('Restaurando estado:', state);
+                this.currentState = state;
+                
+                switch (state.view) {
+                    case 'home':
+                        this.goToHome(false);
+                        break;
+                    case 'artist':
+                        if (state.data) {
+                            displayArtistDetails(state.data);
+                            showTab('artist');
+                        }
+                        break;
+                    case 'album':
+                        if (state.data) {
+                            displayAlbumDetails(state.data);
+                            showTab('album');
+                        }
+                        break;
+                    case 'song':
+                        if (state.data) {
+                            displaySongDetails(state.data);
+                            showTab('song');
+                        }
+                        break;
+                    case 'search':
+                        if (state.data?.query) {
+                            searchInput.value = state.data.query;
+                            searchArtists(state.data.query);
+                            showSearchResults();
+                        }
+                        break;
+                    default:
+                        switchTab(state.view);
+                        break;
+                }
+            },
+            
+            // Volver al home
+            goToHome(addToHistory = true) {
+                hideSearchResults();
+                switchTab('home');
+                searchInput.value = '';
+                
+                if (addToHistory) {
+                    this.pushState('home', null, 'Music Explorer');
+                }
+            }
+        };
+
+
+        // Función auxiliar para títulos de pestañas
+        function getTabTitle(tabName) {
+            const titles = {
+                'home': 'Inicio',
+                'folders': 'Explorar',
+                'stats': 'Estadísticas',
+                'downloads': 'Descargas'
+            };
+            return titles[tabName] || tabName;
+        }
+
         }
 
         // Hacer las funciones globales

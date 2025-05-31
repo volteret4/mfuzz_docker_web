@@ -62,23 +62,45 @@ class MusicExplorer:
         self.preferred_download_method = self.config.get('download', 'preferred_method', fallback='ssh')
 
     def check_local_file_exists(self, file_path):
-        """Versión simple de verificación de archivos"""
+        """Versión mejorada de verificación de archivos con mejor logging"""
         if not self.local_access_enabled or not file_path:
             return False
         
         try:
-            # 1. Verificar ruta completa
+            # 1. Verificar ruta completa tal como está
             if os.path.exists(file_path) and os.access(file_path, os.R_OK):
-                return True
+                self.logger.debug(f"Imagen encontrada (ruta completa): {file_path}")
+                return file_path
             
             # 2. Verificar en rutas montadas
             for mounted_path in self.mounted_paths:
-                if file_path.startswith(mounted_path) and os.path.exists(file_path):
-                    return True
+                # Si el file_path ya contiene el mounted_path, no duplicar
+                if file_path.startswith(mounted_path):
+                    if os.path.exists(file_path) and os.access(file_path, os.R_OK):
+                        self.logger.debug(f"Imagen encontrada (ruta montada directa): {file_path}")
+                        return file_path
+                else:
+                    # Intentar construir la ruta completa
+                    full_path = os.path.join(mounted_path, file_path.lstrip('/'))
+                    if os.path.exists(full_path) and os.access(full_path, os.R_OK):
+                        self.logger.debug(f"Imagen encontrada (ruta construida): {full_path}")
+                        return full_path
             
+            self.logger.debug(f"Imagen NO encontrada: {file_path}")
             return False
+            
         except Exception as e:
             self.logger.debug(f"Error verificando {file_path}: {e}")
+            return False
+
+    def check_local_file_exists_simple(self, file_path):
+        """Versión simplificada para casos básicos"""
+        if not file_path:
+            return False
+        
+        try:
+            return os.path.exists(file_path) and os.access(file_path, os.R_OK)
+        except:
             return False
 
     def perform_local_download(self, album_name, artist_name, download_id, local_info):
@@ -311,7 +333,7 @@ class MusicExplorer:
    
 
     def get_artist_details(self, artist_id):
-        """Obtiene detalles completos de un artista"""
+        """Obtiene detalles completos de un artista - VERSIÓN MEJORADA"""
         conn = self.get_db_connection()
         if not conn:
             return None
@@ -334,7 +356,8 @@ class MusicExplorer:
             cursor.execute("""
                 SELECT al.*, al.album_art_path,
                     COUNT(s.id) as track_count,
-                    MIN(s.file_path) as sample_path
+                    MIN(s.file_path) as sample_path,
+                    MIN(s.album_art_path_denorm) as song_album_art
                 FROM albums al
                 LEFT JOIN songs s ON (al.name = s.album AND s.artist = ? AND s.origen = 'local')
                 WHERE al.artist_id = ? AND al.origen = 'local'
@@ -346,22 +369,8 @@ class MusicExplorer:
             for album_row in cursor.fetchall():
                 album_dict = dict(album_row)
                 
-                # Buscar imagen del álbum
-                best_album_art = None
-                
-                # 1. album_art_path
-                if album_dict.get('album_art_path') and os.path.exists(album_dict['album_art_path']):
-                    best_album_art = album_dict['album_art_path']
-                # 2. Buscar en directorio
-                elif album_dict.get('sample_path'):
-                    from pathlib import Path
-                    album_dir = str(Path(album_dict['sample_path']).parent)
-                    for cover_name in ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png']:
-                        cover_path = os.path.join(album_dir, cover_name)
-                        if os.path.exists(cover_path):
-                            best_album_art = cover_path
-                            break
-                
+                # Usar la función mejorada para buscar imagen del álbum
+                best_album_art = self.get_best_album_image(album_dict)
                 album_dict['best_album_art'] = best_album_art
                 albums.append(album_dict)
             
@@ -380,25 +389,9 @@ class MusicExplorer:
             
             conn.close()
             
-            # Obtener imagen del artista
+            # Obtener imagen del artista usando función mejorada
             artist_dict = dict(artist)
-            best_artist_image = None
-            
-            # Primero img
-            if artist_dict.get('img') and os.path.exists(artist_dict['img']):
-                best_artist_image = artist_dict['img']
-            # Luego img_paths
-            elif artist_dict.get('img_paths'):
-                try:
-                    import json
-                    paths = json.loads(artist_dict['img_paths'])
-                    if isinstance(paths, list) and len(paths) > 0:
-                        first_path = paths[0]
-                        if first_path and os.path.exists(first_path):
-                            best_artist_image = first_path
-                except:
-                    pass
-            
+            best_artist_image = self.get_best_artist_image(artist_dict)
             artist_dict['img'] = best_artist_image
             
             return {
@@ -615,15 +608,16 @@ class MusicExplorer:
         }
 
     def get_best_artist_image(self, artist_row):
-        """Helper para obtener la mejor imagen de un artista"""
+        """Helper para obtener la mejor imagen de un artista - VERSIÓN MEJORADA"""
         if not artist_row or not self.local_access_enabled:
             return None
         
         # 1. Columna img (ruta principal)
         if artist_row.get('img'):
-            img_path = artist_row['img']
-            if self.check_local_file_exists(img_path):
-                return img_path
+            result = self.check_local_file_exists(artist_row['img'])
+            if result:
+                self.logger.debug(f"Imagen de artista encontrada (img): {result}")
+                return result
         
         # 2. Columna img_paths (JSON con múltiples rutas)
         if artist_row.get('img_paths'):
@@ -632,14 +626,19 @@ class MusicExplorer:
                 paths = json.loads(artist_row['img_paths'])
                 if isinstance(paths, list):
                     for path in paths:
-                        if path and self.check_local_file_exists(path):
-                            return path
+                        if path:
+                            result = self.check_local_file_exists(path)
+                            if result:
+                                self.logger.debug(f"Imagen de artista encontrada (img_paths): {result}")
+                                return result
             except (json.JSONDecodeError, TypeError):
                 # Si no es JSON, intentar como CSV
                 paths = [p.strip() for p in str(artist_row['img_paths']).split(',') if p.strip()]
                 for path in paths:
-                    if self.check_local_file_exists(path):
-                        return path
+                    result = self.check_local_file_exists(path)
+                    if result:
+                        self.logger.debug(f"Imagen de artista encontrada (img_paths CSV): {result}")
+                        return result
         
         # 3. Columna img_urls (solo rutas locales)
         if artist_row.get('img_urls'):
@@ -650,45 +649,75 @@ class MusicExplorer:
                     for item in urls:
                         # Puede ser string o dict con 'path'
                         path = item.get('path') if isinstance(item, dict) else item
-                        if path and not str(path).startswith(('http://', 'https://')) and self.check_local_file_exists(path):
-                            return path
+                        if path and not str(path).startswith(('http://', 'https://')):
+                            result = self.check_local_file_exists(path)
+                            if result:
+                                self.logger.debug(f"Imagen de artista encontrada (img_urls): {result}")
+                                return result
             except (json.JSONDecodeError, TypeError):
                 # Si no es JSON, intentar como CSV
                 urls = [u.strip() for u in str(artist_row['img_urls']).split(',') if u.strip()]
                 for url in urls:
-                    if not url.startswith(('http://', 'https://')) and self.check_local_file_exists(url):
-                        return url
+                    if not url.startswith(('http://', 'https://')):
+                        result = self.check_local_file_exists(url)
+                        if result:
+                            self.logger.debug(f"Imagen de artista encontrada (img_urls CSV): {result}")
+                            return result
         
+        self.logger.debug(f"No se encontró imagen para artista: {artist_row.get('name', 'Unknown')}")
         return None
 
 
     def get_best_album_image(self, album_dict):
-        """Helper para obtener la mejor imagen de un álbum"""
+        """Helper para obtener la mejor imagen de un álbum - VERSIÓN MEJORADA"""
+        
         # 1. album_art_path del álbum
         if album_dict.get('album_art_path'):
-            if self.check_local_file_exists(album_dict['album_art_path']):
-                self.logger.info(f"Imagen de álbum encontrada: {album_dict['album_art_path']}")
-                return album_dict['album_art_path']
+            result = self.check_local_file_exists(album_dict['album_art_path'])
+            if result:
+                self.logger.info(f"Imagen de álbum encontrada (album_art_path): {result}")
+                return result
         
-        # 2. album_art_path_denorm de canciones
+        # 2. album_art_path_denorm de canciones (si está disponible)
         if album_dict.get('song_album_art'):
-            if self.check_local_file_exists(album_dict['song_album_art']):
-                self.logger.info(f"Imagen de canción encontrada: {album_dict['song_album_art']}")
-                return album_dict['song_album_art']
+            result = self.check_local_file_exists(album_dict['song_album_art'])
+            if result:
+                self.logger.info(f"Imagen de canción encontrada (song_album_art): {result}")
+                return result
         
-        # 3. Buscar en el directorio del álbum
-        if album_dict.get('album_directory'):
+        # 3. Buscar en el directorio del álbum usando sample_path
+        if album_dict.get('sample_path'):
+            from pathlib import Path
+            album_dir = str(Path(album_dict['sample_path']).parent)
+            
             common_names = [
                 'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png',
                 'album.jpg', 'album.png', 'front.jpg', 'front.png',
                 'albumart.jpg', 'albumartsmall.jpg', 'thumb.jpg'
             ]
+            
             for img_name in common_names:
-                img_path = os.path.join(album_dict['album_directory'], img_name)
-                if self.check_local_file_exists(img_path):
-                    self.logger.info(f"Imagen de álbum descubierta: {img_path}")
-                    return img_path
+                img_path = os.path.join(album_dir, img_name)
+                result = self.check_local_file_exists(img_path)
+                if result:
+                    self.logger.info(f"Imagen de álbum descubierta en directorio: {result}")
+                    return result
         
+        # 4. Si el álbum tiene folder_path, buscar allí también
+        if album_dict.get('folder_path'):
+            common_names = [
+                'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png',
+                'album.jpg', 'album.png', 'front.jpg', 'front.png'
+            ]
+            
+            for img_name in common_names:
+                img_path = os.path.join(album_dict['folder_path'], img_name)
+                result = self.check_local_file_exists(img_path)
+                if result:
+                    self.logger.info(f"Imagen de álbum encontrada en folder_path: {result}")
+                    return result
+        
+        self.logger.debug(f"No se encontró imagen para álbum: {album_dict.get('name', 'Unknown')}")
         return None
 
     def download_album_local(self, album_id, download_id):
