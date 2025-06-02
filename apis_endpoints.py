@@ -23,11 +23,65 @@ class APIEndpoints:
         self.telegram_notifier = telegram_notifier
         self.config = config
         
-        # Registro de descargas activas
+        # Registro de descargas activas - MEJORADO
         self.active_downloads = {}
+        self.download_cleanup_interval = 3600  # 1 hora
         
         # Configurar rutas de API
         self.setup_api_routes()
+        
+        # Programar limpieza de descargas antiguas
+        self._schedule_cleanup()
+    
+    def _schedule_cleanup(self):
+        """Programa la limpieza de descargas antiguas"""
+        import threading
+        
+        def cleanup_worker():
+            while True:
+                try:
+                    current_time = time.time()
+                    expired_downloads = []
+                    
+                    for download_id, info in self.active_downloads.items():
+                        # Limpiar descargas de más de 1 hora
+                        if current_time - info.get('started_at', 0) > self.download_cleanup_interval:
+                            expired_downloads.append(download_id)
+                    
+                    for download_id in expired_downloads:
+                        self._cleanup_download(download_id)
+                    
+                    time.sleep(300)  # Verificar cada 5 minutos
+                except Exception as e:
+                    logger.error(f"Error en limpieza de descargas: {e}")
+                    time.sleep(60)
+        
+        cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
+        cleanup_thread.start()
+
+    def _cleanup_download(self, download_id):
+        """Limpia una descarga específica"""
+        try:
+            if download_id in self.active_downloads:
+                download_info = self.active_downloads[download_id]
+                
+                # Eliminar archivo si existe y la descarga está completada hace más de 1 hora
+                if download_info.get('status') == 'completed':
+                    file_path = download_info.get('file_path')
+                    completed_at = download_info.get('completed_at', 0)
+                    
+                    if file_path and os.path.exists(file_path) and time.time() - completed_at > 3600:
+                        os.remove(file_path)
+                        logger.info(f"Archivo de descarga eliminado: {file_path}")
+                
+                # Eliminar del registro
+                del self.active_downloads[download_id]
+                logger.debug(f"Descarga {download_id} limpiada del registro")
+                
+        except Exception as e:
+            logger.error(f"Error limpiando descarga {download_id}: {e}")
+
+
     
     def setup_api_routes(self):
         """Configura todas las rutas de la API"""
@@ -438,7 +492,7 @@ class APIEndpoints:
                 return jsonify({'error': str(e)}), 500
     
     def _download_album_worker(self, download_id, album, user_info):
-        """Worker para descargar álbum en hilo separado - VERSION CORREGIDA"""
+        """Worker para descargar álbum en hilo separado - VERSION FINAL CORREGIDA"""
         try:
             download_info = self.active_downloads[download_id]
             download_info['status'] = 'processing'
@@ -450,11 +504,14 @@ class APIEndpoints:
             logger.info(f"Iniciando descarga: {artist_name} - {album_name} (ID: {album_id})")
             
             # Notificar inicio de descarga
-            self.telegram_notifier.notify_download_started(
-                album_name, artist_name, 
-                user_info.get('ip', ''), 
-                'local'
-            )
+            try:
+                self.telegram_notifier.notify_download_started(
+                    album_name, artist_name, 
+                    user_info.get('ip', ''), 
+                    'local'
+                )
+            except Exception as e:
+                logger.warning(f"Error notificando inicio: {e}")
             
             # Obtener canciones del álbum con información de rutas
             tracks = self.db_manager.get_album_tracks_with_paths(album_id)
@@ -462,17 +519,22 @@ class APIEndpoints:
                 raise Exception("No se encontraron canciones en el álbum")
             
             download_info['total_tracks'] = len(tracks)
-            download_info['processed_tracks'] = 0  # Inicializar contador
+            download_info['processed_tracks'] = 0
             logger.info(f"Encontradas {len(tracks)} canciones para descargar")
             
             # Crear directorio de descargas si no existe
             downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
             os.makedirs(downloads_dir, exist_ok=True)
             
-            # Crear archivo ZIP directamente en el directorio de descargas
+            # Verificar permisos de escritura
+            if not os.access(downloads_dir, os.W_OK):
+                raise Exception(f"Sin permisos de escritura en directorio de descargas: {downloads_dir}")
+            
+            # Crear nombre seguro para el archivo ZIP
             safe_artist = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_album = "".join(c for c in album_name if c.isalnum() or c in (' ', '-', '_')).strip()
-            zip_filename = f"{safe_artist} - {safe_album}.zip"
+            timestamp = int(time.time())
+            zip_filename = f"{safe_artist} - {safe_album} [{timestamp}].zip"
             zip_path = os.path.join(downloads_dir, zip_filename)
             
             music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
@@ -489,19 +551,19 @@ class APIEndpoints:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zipf:
                 for i, track in enumerate(tracks):
                     try:
-                        track_title = track.get('title', f'Track {i+1}')
-                        track_number = track.get('track_number', i+1)
-                        
                         # Actualizar progreso ANTES de procesar
                         download_info['processed_tracks'] = i
-                        progress = int((i / len(tracks)) * 100)
+                        progress = int((i / len(tracks)) * 90)  # Máximo 90% durante procesamiento
                         download_info['progress'] = progress
+                        
+                        track_title = track.get('title', f'Track {i+1}')
+                        track_number = track.get('track_number', i+1)
                         download_info['current_track'] = track_title
                         
                         logger.debug(f"Procesando canción {i+1}/{len(tracks)}: {track_title}")
                         
                         # Buscar archivo de música
-                        file_path = self._find_track_file(track, music_root)
+                        file_path = self._find_track_file_improved(track, music_root)
                         
                         if file_path and os.path.exists(file_path):
                             # Crear nombre limpio para el archivo en el ZIP
@@ -509,15 +571,20 @@ class APIEndpoints:
                             _, ext = os.path.splitext(file_path)
                             
                             # Nombre del archivo en el ZIP
-                            if track_number:
-                                zip_filename_track = f"{track_number:02d} - {safe_title}{ext}"
+                            if track_number and str(track_number).isdigit():
+                                zip_filename_track = f"{int(track_number):02d} - {safe_title}{ext}"
                             else:
                                 zip_filename_track = f"{safe_title}{ext}"
                             
-                            # Añadir archivo al ZIP
-                            zipf.write(file_path, zip_filename_track)
-                            successful_files += 1
-                            logger.debug(f"Añadido al ZIP: {zip_filename_track}")
+                            # Verificar que el archivo no está vacío
+                            file_size = os.path.getsize(file_path)
+                            if file_size > 0:
+                                # Añadir archivo al ZIP
+                                zipf.write(file_path, zip_filename_track)
+                                successful_files += 1
+                                logger.debug(f"Añadido al ZIP: {zip_filename_track} ({file_size} bytes)")
+                            else:
+                                failed_files.append(f"{track_title} - Archivo vacío")
                             
                         else:
                             error_msg = f"Archivo no encontrado para: {track_title}"
@@ -532,9 +599,9 @@ class APIEndpoints:
                         failed_files.append(error_msg)
                         continue
                 
-                # Actualizar progreso final
+                # Actualizar progreso final del procesamiento
                 download_info['processed_tracks'] = len(tracks)
-                download_info['progress'] = 100
+                download_info['progress'] = 95
             
             if successful_files == 0:
                 # Limpiar archivo ZIP vacío
@@ -556,6 +623,7 @@ class APIEndpoints:
             
             # Actualizar estado final
             download_info['status'] = 'completed'
+            download_info['progress'] = 100
             download_info['file_path'] = zip_path
             download_info['zip_filename'] = zip_filename
             download_info['successful_files'] = successful_files
@@ -565,11 +633,14 @@ class APIEndpoints:
             download_info['file_size'] = zip_size
             
             # Notificar finalización
-            self.telegram_notifier.notify_download_completed(
-                album_name, artist_name, 
-                successful_files, zip_path, 
-                'local'
-            )
+            try:
+                self.telegram_notifier.notify_download_completed(
+                    album_name, artist_name, 
+                    successful_files, zip_path, 
+                    'local'
+                )
+            except Exception as e:
+                logger.warning(f"Error notificando finalización: {e}")
             
         except Exception as e:
             logger.error(f"Error en descarga {download_id}: {e}")
@@ -586,11 +657,89 @@ class APIEndpoints:
                 pass
             
             # Notificar error
-            self.telegram_notifier.notify_download_error(
-                album.get('name', ''), 
-                album.get('artist_name', ''), 
-                str(e)
-            )
+            try:
+                self.telegram_notifier.notify_download_error(
+                    album.get('name', ''), 
+                    album.get('artist_name', ''), 
+                    str(e)
+                )
+            except Exception as notify_error:
+                logger.warning(f"Error notificando error: {notify_error}")
+
+
+    def _find_track_file_improved(self, track, music_root):
+            """Busca el archivo de una canción en el sistema de archivos - VERSION MEJORADA"""
+            
+            # Obtener la ruta principal del campo file_path
+            file_path = track.get('file_path', '').strip()
+            
+            if not file_path:
+                logger.debug(f"No hay file_path para: {track.get('title', 'Sin título')}")
+                return None
+            
+            # Limpiar la ruta
+            if file_path.startswith('file://'):
+                file_path = file_path[7:]
+            
+            # Probar diferentes formas de construir la ruta
+            search_paths = []
+            
+            # Ruta 1: Si es absoluta, usar directamente
+            if file_path.startswith('/'):
+                search_paths.append(file_path)
+            
+            # Ruta 2: Relativa desde music_root
+            search_paths.append(os.path.join(music_root, file_path.lstrip('/')))
+            
+            # Ruta 3: Si la ruta contiene el music_root duplicado, limpiar
+            if music_root in file_path and not file_path.startswith(music_root):
+                clean_path = file_path.replace(music_root, '').lstrip('/')
+                search_paths.append(os.path.join(music_root, clean_path))
+            
+            # Verificar cada ruta
+            for search_path in search_paths:
+                if os.path.exists(search_path) and os.path.isfile(search_path):
+                    logger.debug(f"Archivo encontrado: {search_path}")
+                    return search_path
+                else:
+                    logger.debug(f"Archivo no existe: {search_path}")
+            
+            # Si no se encuentra, intentar búsqueda por patrón como último recurso
+            return self._search_track_by_pattern_improved(track, music_root)
+
+
+    def _search_track_by_pattern_improved(self, track, music_root):
+        """Búsqueda por patrón mejorada"""
+        try:
+            artist = track.get('artist', '').strip()
+            album = track.get('album', '').strip()
+            title = track.get('title', '').strip()
+            
+            if not all([artist, album, title]):
+                return None
+            
+            # Buscar en directorio del artista/álbum
+            possible_dirs = [
+                os.path.join(music_root, artist, album),
+                os.path.join(music_root, artist.replace(' ', '_'), album),
+                os.path.join(music_root, artist, album.replace(' ', '_')),
+            ]
+            
+            for base_dir in possible_dirs:
+                if os.path.exists(base_dir) and os.path.isdir(base_dir):
+                    # Buscar archivos que contengan el título
+                    for filename in os.listdir(base_dir):
+                        if any(ext in filename.lower() for ext in ['.mp3', '.flac', '.ogg', '.m4a', '.wav']):
+                            if title.lower() in filename.lower():
+                                full_path = os.path.join(base_dir, filename)
+                                logger.debug(f"Encontrado por patrón: {full_path}")
+                                return full_path
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error en búsqueda por patrón: {e}")
+            return None
 
 
 

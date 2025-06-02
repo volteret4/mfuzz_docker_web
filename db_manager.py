@@ -188,61 +188,53 @@ class DatabaseManager:
             return []
     
     def get_album_tracks_by_id(self, album_id: int) -> List[Dict]:
-        """Obtiene las canciones de un álbum por ID - VERSION MEJORADA"""
+        """Obtiene las canciones de un álbum por ID - VERSION CORREGIDA"""
         try:
             with self.get_connection() as conn:
-                # Primero intentar con la relación album_id directa
-                cursor = conn.execute("""
-                    SELECT s.*, a.name as album_name, ar.name as artist_name
-                    FROM songs s
-                    JOIN albums a ON s.album_id = a.id
-                    JOIN artists ar ON a.artist_id = ar.id
-                    WHERE a.id = ?
-                    ORDER BY s.track_number
-                """, (album_id,))
-                tracks = [dict(row) for row in cursor.fetchall()]
+                # Obtener información del álbum primero
+                album_info = self.get_album_by_id(album_id)
+                if not album_info:
+                    logger.error(f"Álbum {album_id} no encontrado")
+                    return []
                 
-                if tracks:
-                    logger.debug(f"Encontradas {len(tracks)} canciones con album_id para álbum {album_id}")
-                    return tracks
+                album_name = album_info.get('name')
+                artist_name = album_info.get('artist_name')
                 
-                # Fallback: intentar con la relación por nombre de álbum
-                cursor = conn.execute("""
-                    SELECT s.*, a.name as album_name, ar.name as artist_name
-                    FROM songs s
-                    JOIN albums a ON s.album = a.name
-                    JOIN artists ar ON a.artist_id = ar.id
-                    WHERE a.id = ?
-                    ORDER BY s.track_number
-                """, (album_id,))
-                tracks = [dict(row) for row in cursor.fetchall()]
-                
-                if tracks:
-                    logger.debug(f"Encontradas {len(tracks)} canciones con album name para álbum {album_id}")
-                    return tracks
-                
-                # Último intento: buscar directamente por album_id si existe esa columna
-                try:
-                    cursor = conn.execute("PRAGMA table_info(songs)")
-                    columns = [col[1] for col in cursor.fetchall()]
+                # Buscar canciones por nombre de álbum y artista
+                if album_name and artist_name:
+                    cursor = conn.execute("""
+                        SELECT * FROM songs 
+                        WHERE album = ? AND artist = ?
+                        ORDER BY track_number
+                    """, (album_name, artist_name))
+                    tracks = [dict(row) for row in cursor.fetchall()]
                     
-                    if 'album_id' in columns:
-                        cursor = conn.execute("""
-                            SELECT s.*, 
-                                   (SELECT name FROM albums WHERE id = s.album_id) as album_name,
-                                   (SELECT ar.name FROM albums a JOIN artists ar ON a.artist_id = ar.id WHERE a.id = s.album_id) as artist_name
-                            FROM songs s
-                            WHERE s.album_id = ?
-                            ORDER BY s.track_number
-                        """, (album_id,))
-                        tracks = [dict(row) for row in cursor.fetchall()]
+                    if tracks:
+                        # Añadir información del álbum y artista
+                        for track in tracks:
+                            track['album_name'] = album_name
+                            track['artist_name'] = artist_name
                         
-                        if tracks:
-                            logger.debug(f"Encontradas {len(tracks)} canciones con album_id directo para álbum {album_id}")
-                            return tracks
+                        logger.debug(f"Encontradas {len(tracks)} canciones para álbum {album_id}")
+                        return tracks
                 
-                except sqlite3.Error as e:
-                    logger.debug(f"Error en último intento de búsqueda: {e}")
+                # Fallback: búsqueda flexible
+                if album_name:
+                    cursor = conn.execute("""
+                        SELECT * FROM songs 
+                        WHERE album LIKE ?
+                        ORDER BY track_number
+                    """, (f"%{album_name}%",))
+                    tracks = [dict(row) for row in cursor.fetchall()]
+                    
+                    # Añadir información del álbum y artista
+                    for track in tracks:
+                        track['album_name'] = album_name
+                        track['artist_name'] = artist_name
+                    
+                    if tracks:
+                        logger.debug(f"Encontradas {len(tracks)} canciones (fallback) para álbum {album_id}")
+                        return tracks
                 
                 logger.warning(f"No se encontraron canciones para el álbum {album_id}")
                 return []
@@ -439,143 +431,95 @@ class DatabaseManager:
         return results
     
     def get_album_tracks_with_paths(self, album_id: int) -> List[Dict]:
-        """Obtiene las canciones de un álbum con información detallada de rutas - VERSION MEJORADA"""
+        """Obtiene las canciones de un álbum con información detallada de rutas - VERSIÓN CORREGIDA PARA ESQUEMA REAL"""
         try:
             with self.get_connection() as conn:
-                # Obtener información de columnas de la tabla songs
-                cursor = conn.execute("PRAGMA table_info(songs)")
-                columns = [col[1] for col in cursor.fetchall()]
+                logger.debug(f"Obteniendo canciones para álbum {album_id}")
                 
-                logger.debug(f"Columnas disponibles en songs: {columns}")
-                
-                # Construir query dinámicamente basado en columnas disponibles
-                path_fields = []
-                for col in columns:
-                    if any(keyword in col.lower() for keyword in ['path', 'file', 'location', 'url']):
-                        path_fields.append(col)
-                
-                logger.debug(f"Campos de ruta encontrados: {path_fields}")
-                
-                # Intentar diferentes estrategias para obtener las canciones
-                tracks = []
-                
-                # Estrategia 1: album_id directo
-                if 'album_id' in columns:
-                    try:
-                        cursor = conn.execute("""
-                            SELECT s.*, a.name as album_name, ar.name as artist_name
-                            FROM songs s
-                            JOIN albums a ON s.album_id = a.id
-                            JOIN artists ar ON a.artist_id = ar.id
-                            WHERE a.id = ?
-                            ORDER BY s.track_number
-                        """, (album_id,))
-                        tracks = [dict(row) for row in cursor.fetchall()]
-                        if tracks:
-                            logger.debug(f"Estrategia 1 exitosa: {len(tracks)} canciones")
-                    except sqlite3.Error as e:
-                        logger.debug(f"Estrategia 1 falló: {e}")
-                
-                # Estrategia 2: por nombre de álbum
-                if not tracks:
-                    try:
-                        cursor = conn.execute("""
-                            SELECT s.*, a.name as album_name, ar.name as artist_name
-                            FROM songs s
-                            JOIN albums a ON s.album = a.name
-                            JOIN artists ar ON a.artist_id = ar.id
-                            WHERE a.id = ?
-                            ORDER BY s.track_number
-                        """, (album_id,))
-                        tracks = [dict(row) for row in cursor.fetchall()]
-                        if tracks:
-                            logger.debug(f"Estrategia 2 exitosa: {len(tracks)} canciones")
-                    except sqlite3.Error as e:
-                        logger.debug(f"Estrategia 2 falló: {e}")
-                
-                # Estrategia 3: búsqueda más amplia usando información del álbum
-                if not tracks:
-                    try:
-                        # Primero obtener información del álbum
-                        album_info = self.get_album_by_id(album_id)
-                        if album_info:
-                            album_name = album_info.get('name')
-                            artist_name = album_info.get('artist_name')
-                            
-                            if album_name and artist_name:
-                                cursor = conn.execute("""
-                                    SELECT s.*
-                                    FROM songs s
-                                    WHERE s.album = ? AND s.artist = ?
-                                    ORDER BY s.track_number
-                                """, (album_name, artist_name))
-                                tracks = [dict(row) for row in cursor.fetchall()]
-                                
-                                # Añadir información del álbum y artista
-                                for track in tracks:
-                                    track['album_name'] = album_name
-                                    track['artist_name'] = artist_name
-                                
-                                if tracks:
-                                    logger.debug(f"Estrategia 3 exitosa: {len(tracks)} canciones")
-                    except sqlite3.Error as e:
-                        logger.debug(f"Estrategia 3 falló: {e}")
-                
-                # Estrategia 4: búsqueda por LIKE (menos precisa pero más flexible)
-                if not tracks:
-                    try:
-                        album_info = self.get_album_by_id(album_id)
-                        if album_info:
-                            album_name = album_info.get('name')
-                            artist_name = album_info.get('artist_name')
-                            
-                            if album_name:
-                                cursor = conn.execute("""
-                                    SELECT s.*
-                                    FROM songs s
-                                    WHERE s.album LIKE ?
-                                    ORDER BY s.track_number
-                                """, (f"%{album_name}%",))
-                                tracks = [dict(row) for row in cursor.fetchall()]
-                                
-                                # Filtrar por artista si está disponible
-                                if artist_name and tracks:
-                                    tracks = [t for t in tracks if artist_name.lower() in t.get('artist', '').lower()]
-                                
-                                # Añadir información del álbum y artista
-                                for track in tracks:
-                                    track['album_name'] = album_name
-                                    track['artist_name'] = artist_name
-                                
-                                if tracks:
-                                    logger.debug(f"Estrategia 4 exitosa: {len(tracks)} canciones")
-                    except sqlite3.Error as e:
-                        logger.debug(f"Estrategia 4 falló: {e}")
-                
-                if not tracks:
-                    logger.warning(f"No se pudieron obtener canciones para álbum {album_id}")
+                # La tabla songs NO tiene album_id, pero sí tiene campos album y artist
+                # Primero obtenemos información del álbum
+                album_info = self.get_album_by_id(album_id)
+                if not album_info:
+                    logger.error(f"Álbum {album_id} no encontrado")
                     return []
                 
-                # Enriquecer con información de rutas
-                for track in tracks:
-                    # Recopilar todas las rutas disponibles
-                    track['available_paths'] = {}
-                    for field in path_fields:
-                        if field in track and track[field]:
-                            path_value = track[field]
-                            if isinstance(path_value, str) and path_value.strip():
-                                track['available_paths'][field] = path_value.strip()
-                    
-                    # Determinar la mejor ruta
-                    track['best_path'] = self._determine_best_path(track, path_fields)
-                    
-                    # Log de debug para la primera canción
-                    if track == tracks[0]:
-                        logger.debug(f"Ejemplo de canción - Título: {track.get('title')}")
-                        logger.debug(f"Rutas disponibles: {track['available_paths']}")
-                        logger.debug(f"Mejor ruta: {track['best_path']}")
+                album_name = album_info.get('name')
+                artist_name = album_info.get('artist_name')
                 
-                logger.info(f"Obtenidas {len(tracks)} canciones para álbum {album_id}")
+                logger.debug(f"Buscando canciones para: {artist_name} - {album_name}")
+                
+                # Estrategia 1: Búsqueda exacta por álbum y artista
+                tracks = []
+                if album_name and artist_name:
+                    cursor = conn.execute("""
+                        SELECT * FROM songs 
+                        WHERE album = ? AND artist = ?
+                        ORDER BY track_number
+                    """, (album_name, artist_name))
+                    tracks = [dict(row) for row in cursor.fetchall()]
+                    
+                    if tracks:
+                        logger.debug(f"Estrategia 1 exitosa: {len(tracks)} canciones encontradas")
+                
+                # Estrategia 2: Búsqueda flexible por álbum (si la primera no funciona)
+                if not tracks and album_name:
+                    cursor = conn.execute("""
+                        SELECT * FROM songs 
+                        WHERE album LIKE ?
+                        ORDER BY track_number
+                    """, (f"%{album_name}%",))
+                    all_tracks = [dict(row) for row in cursor.fetchall()]
+                    
+                    # Filtrar por artista si es necesario
+                    if artist_name and all_tracks:
+                        tracks = [t for t in all_tracks if artist_name.lower() in t.get('artist', '').lower()]
+                    else:
+                        tracks = all_tracks
+                    
+                    if tracks:
+                        logger.debug(f"Estrategia 2 exitosa: {len(tracks)} canciones encontradas")
+                
+                # Estrategia 3: Búsqueda por artista similar (último recurso)
+                if not tracks and artist_name:
+                    cursor = conn.execute("""
+                        SELECT * FROM songs 
+                        WHERE artist LIKE ?
+                        ORDER BY album, track_number
+                    """, (f"%{artist_name}%",))
+                    all_tracks = [dict(row) for row in cursor.fetchall()]
+                    
+                    # Filtrar manualmente por álbum
+                    if album_name and all_tracks:
+                        tracks = [t for t in all_tracks if album_name.lower() in t.get('album', '').lower()]
+                    
+                    if tracks:
+                        logger.debug(f"Estrategia 3 exitosa: {len(tracks)} canciones encontradas")
+                
+                if not tracks:
+                    logger.warning(f"No se encontraron canciones para el álbum {album_id}")
+                    return []
+                
+                # Enriquecer con información de rutas y metadatos
+                for track in tracks:
+                    # Añadir información del álbum
+                    track['album_name'] = album_name
+                    track['artist_name'] = artist_name
+                    
+                    # Procesar información de rutas
+                    file_path = track.get('file_path', '')
+                    track['available_paths'] = {}
+                    
+                    if file_path:
+                        track['available_paths']['file_path'] = file_path
+                        track['best_path'] = file_path
+                    else:
+                        track['best_path'] = None
+                    
+                    # Log de debug para las primeras canciones
+                    if tracks.index(track) < 3:
+                        logger.debug(f"Canción: {track.get('title')} - Ruta: {track.get('best_path')}")
+                
+                logger.info(f"Obtenidas {len(tracks)} canciones para álbum {album_id} ({artist_name} - {album_name})")
                 return tracks
                 
         except Exception as e:
