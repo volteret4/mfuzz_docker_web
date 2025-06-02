@@ -58,7 +58,7 @@ ui:
 
 downloads:
   # Modo: 'local' o 'ssh'
-  mode: 'ssh'  # Cambiar a 'ssh' para usar rsync
+  mode: 'local'  # Cambiar a 'ssh' para usar rsync
   
   # Configuración para modo SSH
   ssh:

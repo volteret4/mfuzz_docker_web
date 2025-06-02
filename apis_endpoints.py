@@ -1941,7 +1941,7 @@ class APIEndpoints:
 
 
     def _download_album_worker_ssh(self, download_id, album, user_info):
-        """Worker para descargar álbum en modo SSH - NUEVA FUNCIONALIDAD"""
+        """Worker para descargar álbum en modo SSH - CORREGIDO PARA NO VERIFICAR LOCALMENTE"""
         try:
             # Verificar que la descarga existe al inicio
             if download_id not in self.active_downloads:
@@ -1967,27 +1967,20 @@ class APIEndpoints:
             except Exception as e:
                 logger.warning(f"Error notificando inicio SSH: {e}")
             
-            # Obtener ruta de origen del álbum
+            # CORREGIDO: Obtener ruta sin verificar existencia local
             source_path = self.download_manager.get_album_source_path(album)
             if not source_path:
                 raise Exception("No se pudo determinar la ruta del álbum")
             
-            logger.info(f"Ruta de origen para SSH: {source_path}")
-
-            # Verificar si necesitamos usar el directorio padre
-            # Si la ruta termina en "Disc 1", "Disc 2", etc., usar el directorio padre
-            
+            # NUEVO: Detectar si es un subdirectorio de disco y usar el padre
+            import re
             if re.search(r'/Disc \d+$', source_path):
                 parent_path = os.path.dirname(source_path)
-                logger.info(f"Detectado subdirectorio de disco, usando directorio padre: {parent_path}")
+                logger.info(f"Detectado subdirectorio de disco '{os.path.basename(source_path)}', usando directorio padre: {parent_path}")
                 source_path = parent_path
             
-            # Verificar que la descarga sigue existiendo
-            if download_id not in self.active_downloads:
-                logger.error(f"Download ID {download_id} desapareció durante preparación SSH")
-                return
-
-
+            logger.info(f"Ruta de origen SSH: {source_path}")
+            
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante preparación SSH")
@@ -1996,43 +1989,31 @@ class APIEndpoints:
             # FASE 1: Transferencia SSH con rsync
             self.active_downloads[download_id]['status'] = 'ssh_transferring'
             self.active_downloads[download_id]['progress'] = 10
-            self.active_downloads[download_id]['current_track'] = 'Transfiriendo archivos con rsync...'
+            self.active_downloads[download_id]['current_track'] = 'Verificando archivos remotos...'
             
             def progress_callback(line):
-                """Callback para monitorear progreso de rsync"""
+                """Callback para monitorear progreso de operaciones SSH"""
                 if download_id in self.active_downloads:
-                    # Interpretar salida de rsync para calcular progreso
-                    if 'to-chk=' in line:
-                        try:
-                            # Extraer progreso de la línea de rsync
-                            parts = line.split('to-chk=')[1].split(')')
-                            remaining, total = map(int, parts[0].split('/'))
-                            if total > 0:
-                                progress = 10 + int(((total - remaining) / total) * 50)  # 10% a 60%
-                                self.active_downloads[download_id]['progress'] = min(progress, 60)
-                        except:
-                            pass
-                    # Mostrar archivo actual
-                    if line and not line.startswith('sending') and '/' in line:
-                        filename = os.path.basename(line.strip())
+                    if line and not line.startswith('total'):
+                        filename = line.strip()
                         if filename:
-                            self.active_downloads[download_id]['current_track'] = f'Transfiriendo: {filename}'
+                            self.active_downloads[download_id]['current_track'] = f'Procesando: {filename}'
             
-            # Ejecutar rsync
-            rsync_result = self.download_manager.execute_rsync(
+            # Ejecutar operación SSH
+            ssh_result = self.download_manager.execute_ssh_transfer(
                 source_path, album, download_id, progress_callback
             )
             
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
-                logger.error(f"Download ID {download_id} desapareció durante rsync")
+                logger.error(f"Download ID {download_id} desapareció durante transferencia SSH")
                 return
             
-            if not rsync_result['success']:
-                raise Exception(f"Error en rsync: {rsync_result['error']}")
+            if not ssh_result['success']:
+                raise Exception(f"Error en transferencia SSH: {ssh_result['error']}")
             
-            remote_path = rsync_result['remote_path']
-            logger.info(f"Rsync completado para {download_id}, archivos en: {remote_path}")
+            remote_path = ssh_result['remote_path']
+            logger.info(f"Transferencia SSH completada para {download_id}, archivos en: {remote_path}")
             
             # FASE 2: Compresión remota y descarga
             self.active_downloads[download_id]['status'] = 'ssh_compressing'
@@ -2095,7 +2076,7 @@ class APIEndpoints:
             # Notificar finalización de transferencia SSH
             try:
                 self.telegram_notifier.notify_download_completed(
-                    album_name, artist_name, rsync_result['files_copied'], 
+                    album_name, artist_name, ssh_result['files_copied'], 
                     compression_result['file_path'], 'ssh'
                 )
             except Exception as e:

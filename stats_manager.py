@@ -313,8 +313,8 @@ class StatsManager:
             return {}
     
     def create_chart(self, chart_type: str, data: List[Dict], title: str = "", 
-                     x_field: str = None, y_field: str = None) -> str:
-        """Crea un gráfico interactivo usando Plotly"""
+                 x_field: str = None, y_field: str = None) -> str:
+        """Crea un gráfico interactivo usando Plotly - VERSION MEJORADA"""
         try:
             if not PLOTLY_AVAILABLE:
                 return self._create_simple_chart_fallback(chart_type, data, title)
@@ -326,50 +326,141 @@ class StatsManager:
             df = pd.DataFrame(data)
             
             if chart_type == 'pie':
-                # Gráfico circular
+                # Gráfico circular MEJORADO
                 fig = px.pie(df, 
-                           values=y_field or df.columns[1], 
-                           names=x_field or df.columns[0],
-                           title=title)
+                        values=y_field or df.columns[1], 
+                        names=x_field or df.columns[0],
+                        title=title)
+                
+                # Configuración específica para gráficos circulares
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='label+percent+value',
+                    textfont_size=14,  # Texto más grande
+                    marker=dict(line=dict(color='#000000', width=2)),
+                    pull=[0.1 if i == 0 else 0 for i in range(len(data))]  # Destacar el primer sector
+                )
+                
+                # Mejorar leyenda para gráficos circulares
+                fig.update_layout(
+                    legend=dict(
+                        orientation="v",
+                        yanchor="top",
+                        y=1,
+                        xanchor="left",
+                        x=1.01,
+                        font=dict(size=12)
+                    )
+                )
                 
             elif chart_type == 'bar':
-                # Gráfico de barras
+                # Gráfico de barras COMPLETAMENTE REDISEÑADO
                 fig = px.bar(df, 
-                           x=x_field or df.columns[0], 
-                           y=y_field or df.columns[1],
-                           title=title)
+                        x=x_field or df.columns[0], 
+                        y=y_field or df.columns[1],
+                        title=title,
+                        color_discrete_sequence=['#a8e6cf'])  # Color verde de tu tema
+                
+                # Configuración específica para barras
+                fig.update_traces(
+                    marker=dict(
+                        line=dict(color='rgba(255,255,255,0.3)', width=1),
+                        opacity=0.8
+                    ),
+                    texttemplate='%{y}',
+                    textposition='outside',
+                    textfont=dict(size=12, color='white')
+                )
+                
+                # Rotar etiquetas del eje X si son largas
+                fig.update_xaxes(
+                    tickangle=45 if any(len(str(x)) > 10 for x in df.iloc[:, 0]) else 0,
+                    tickfont=dict(size=11, color='white')
+                )
+                
+                fig.update_yaxes(
+                    tickfont=dict(size=11, color='white'),
+                    gridcolor='rgba(255,255,255,0.2)'
+                )
                 
             elif chart_type == 'line':
-                # Gráfico de líneas
+                # Gráfico de líneas MEJORADO
                 fig = px.line(df, 
                             x=x_field or df.columns[0], 
                             y=y_field or df.columns[1],
-                            title=title)
+                            title=title,
+                            markers=True)
+                
+                # Configuración específica para líneas
+                fig.update_traces(
+                    line=dict(color='#a8e6cf', width=3),
+                    marker=dict(size=8, color='#2a5298', line=dict(width=2, color='white')),
+                    textfont=dict(size=12, color='white')
+                )
+                
+                fig.update_xaxes(
+                    tickfont=dict(size=11, color='white'),
+                    gridcolor='rgba(255,255,255,0.2)'
+                )
+                
+                fig.update_yaxes(
+                    tickfont=dict(size=11, color='white'),
+                    gridcolor='rgba(255,255,255,0.2)'
+                )
                 
             elif chart_type == 'scatter':
-                # Gráfico de dispersión
+                # Gráfico de dispersión MEJORADO
                 fig = px.scatter(df, 
-                               x=x_field or df.columns[0], 
-                               y=y_field or df.columns[1],
-                               title=title)
+                            x=x_field or df.columns[0], 
+                            y=y_field or df.columns[1],
+                            title=title,
+                            size_max=15)
+                
+                fig.update_traces(
+                    marker=dict(
+                        size=10,
+                        color='#a8e6cf',
+                        line=dict(width=2, color='white'),
+                        opacity=0.8
+                    )
+                )
+                
             else:
                 return self._create_empty_chart(f"Tipo de gráfico no soportado: {chart_type}")
             
-            # Configurar interactividad y estilo
+            # Configurar tema oscuro personalizado que coincida con tu webapp
             fig.update_layout(
                 template='plotly_dark',
-                font=dict(family="Arial, sans-serif", size=12),
-                title_font=dict(size=16),
+                plot_bgcolor='rgba(30, 60, 114, 0.1)',  # Fondo similar al de tu webapp
+                paper_bgcolor='rgba(30, 60, 114, 0.05)',
+                font=dict(
+                    family="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif", 
+                    size=13,
+                    color='white'
+                ),
+                title=dict(
+                    font=dict(size=18, color='#a8e6cf'),  # Verde de tu tema
+                    x=0.5,  # Centrar título
+                    xanchor='center'
+                ),
                 showlegend=True,
-                height=400,
-                margin=dict(l=50, r=50, t=60, b=50)
+                height=450,  # Un poco más alto
+                margin=dict(l=60, r=60, t=80, b=60),
+                # Añadir bordes y efectos
+                shapes=[
+                    dict(
+                        type="rect",
+                        xref="paper", yref="paper",
+                        x0=0, y0=0, x1=1, y1=1,
+                        line=dict(color="rgba(168, 230, 207, 0.3)", width=1)
+                    )
+                ]
             )
             
-            # Hacer clickeable
+            # Configurar hover personalizado
             fig.update_traces(
-                hovertemplate='<b>%{label}</b><br>Valor: %{value}<extra></extra>',
-                textposition='inside',
-                textinfo='label+percent' if chart_type == 'pie' else 'value'
+                hovertemplate='<b>%{label}</b><br>Valor: %{value}<br><extra></extra>' if chart_type == 'pie' 
+                            else '<b>%{x}</b><br>Valor: %{y}<br><extra></extra>',
             )
             
             # Convertir a JSON para el frontend
@@ -391,8 +482,9 @@ class StatsManager:
         }
         return json.dumps(fallback_data)
     
+
     def _create_empty_chart(self, message: str) -> str:
-        """Crea un gráfico vacío con mensaje"""
+        """Crea un gráfico vacío con mensaje - VERSION MEJORADA"""
         if PLOTLY_AVAILABLE:
             fig = go.Figure()
             fig.add_annotation(
@@ -400,12 +492,15 @@ class StatsManager:
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,
-                font=dict(size=16)
+                font=dict(size=18, color='#a8e6cf')  # Texto más grande y en verde
             )
             fig.update_layout(
                 template='plotly_dark',
-                height=400,
-                showlegend=False
+                plot_bgcolor='rgba(30, 60, 114, 0.1)',
+                paper_bgcolor='rgba(30, 60, 114, 0.05)',
+                height=450,
+                showlegend=False,
+                font=dict(color='white')
             )
             return fig.to_json()
         else:
@@ -414,21 +509,26 @@ class StatsManager:
                 "layout": {"title": message}
             })
     
+
     def get_chart_data_for_frontend(self, chart_type: str, category: str) -> Dict[str, Any]:
-        """Prepara datos de gráficos específicos para el frontend"""
+        """Prepara datos de gráficos específicos para el frontend - VERSION MEJORADA"""
         try:
             if category == 'artists':
                 stats = self.get_artists_stats()
                 if chart_type == 'countries':
+                    # Limitar a top 8 países para mejor visualización
+                    top_countries = stats['by_country'][:8]
                     return {
-                        'chart': self.create_chart('pie', stats['by_country'], 
-                                                 'Artistas por País', 'origin', 'count'),
+                        'chart': self.create_chart('pie', top_countries, 
+                                                'Artistas por País (Top 8)', 'origin', 'count'),
                         'data': stats['by_country']
                     }
                 elif chart_type == 'top':
+                    # Limitar a top 12 artistas para mejor visualización
+                    top_artists = stats['top_artists'][:12]
                     return {
-                        'chart': self.create_chart('bar', stats['top_artists'][:10], 
-                                                 'Top 10 Artistas por Álbumes', 'name', 'album_count'),
+                        'chart': self.create_chart('bar', top_artists, 
+                                                'Top 12 Artistas por Álbumes', 'name', 'album_count'),
                         'data': stats['top_artists']
                     }
                     
@@ -437,28 +537,34 @@ class StatsManager:
                 if chart_type == 'decades':
                     return {
                         'chart': self.create_chart('bar', stats['by_decade'], 
-                                                 'Álbumes por Década', 'decade', 'count'),
+                                                'Álbumes por Década', 'decade', 'count'),
                         'data': stats['by_decade']
                     }
                 elif chart_type == 'genres':
+                    # Limitar a top 10 géneros para gráfico circular
+                    top_genres = stats['by_genre'][:10]
                     return {
-                        'chart': self.create_chart('pie', stats['by_genre'][:10], 
-                                                 'Álbumes por Género', 'genre', 'count'),
+                        'chart': self.create_chart('pie', top_genres, 
+                                                'Álbumes por Género (Top 10)', 'genre', 'count'),
                         'data': stats['by_genre']
                     }
                 elif chart_type == 'labels':
+                    # Limitar a top 12 sellos para mejor visualización
+                    top_labels = stats['by_label'][:12]
                     return {
-                        'chart': self.create_chart('bar', stats['by_label'][:10], 
-                                                 'Top 10 Sellos Discográficos', 'label', 'count'),
+                        'chart': self.create_chart('bar', top_labels, 
+                                                'Top 12 Sellos Discográficos', 'label', 'count'),
                         'data': stats['by_label']
                     }
                     
             elif category == 'songs':
                 stats = self.get_songs_stats()
                 if chart_type == 'genres':
+                    # Limitar a top 10 géneros para gráfico circular
+                    top_genres = stats['by_genre'][:10]
                     return {
-                        'chart': self.create_chart('pie', stats['by_genre'][:10], 
-                                                 'Canciones por Género', 'genre', 'count'),
+                        'chart': self.create_chart('pie', top_genres, 
+                                                'Canciones por Género (Top 10)', 'genre', 'count'),
                         'data': stats['by_genre']
                     }
                     

@@ -333,3 +333,125 @@ class DownloadManager:
         except Exception as e:
             logger.error(f"Error en limpieza remota: {e}")
             return False
+
+
+    def execute_ssh_transfer(self, source_path: str, album_info: Dict, download_id: str, progress_callback=None) -> Dict:
+        """Ejecuta transferencia SSH - copia archivos dentro del servidor remoto"""
+        try:
+            album_name = album_info.get('name', 'Unknown')
+            artist_name = album_info.get('artist_name', 'Unknown')
+            
+            # Crear un directorio temporal único en el servidor remoto
+            safe_name = f"{artist_name}_{album_name}_{int(time.time())}"
+            safe_name = "".join(c for c in safe_name if c.isalnum() or c in ('_', '-'))
+            
+            remote_temp_path = f"/tmp/music_transfer_{safe_name}"
+            
+            logger.info(f"Transferencia SSH:")
+            logger.info(f"  - Origen remoto: {source_path}")
+            logger.info(f"  - Destino temporal remoto: {remote_temp_path}")
+            
+            # PASO 1: Verificar que el directorio origen existe en el servidor remoto
+            verify_cmd = ['ssh']
+            if self.ssh_key_path and os.path.exists(self.ssh_key_path):
+                verify_cmd.extend(['-i', self.ssh_key_path])
+            verify_cmd.extend([self.ssh_host, f'test -d {shlex.quote(source_path)}'])
+            
+            logger.info(f"Verificando directorio remoto: {' '.join(verify_cmd)}")
+            verify_result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
+            
+            if verify_result.returncode != 0:
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': f'Directorio no encontrado en servidor remoto: {source_path}'
+                }
+            
+            # PASO 2: Crear directorio temporal y copiar archivos
+            commands = [
+                f'rm -rf {shlex.quote(remote_temp_path)}',  # Limpiar si existe
+                f'mkdir -p {shlex.quote(remote_temp_path)}',  # Crear directorio
+                f'cp -r {shlex.quote(source_path)}/* {shlex.quote(remote_temp_path)}/ 2>/dev/null || cp -r {shlex.quote(source_path)} {shlex.quote(remote_temp_path + "/album")}',  # Copiar contenido
+            ]
+            
+            for i, cmd in enumerate(commands):
+                ssh_cmd = ['ssh']
+                if self.ssh_key_path and os.path.exists(self.ssh_key_path):
+                    ssh_cmd.extend(['-i', self.ssh_key_path])
+                ssh_cmd.extend([self.ssh_host, cmd])
+                
+                logger.info(f"Ejecutando comando SSH {i+1}/{len(commands)}: {cmd}")
+                result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode != 0:
+                    if 'rm -rf' in cmd:
+                        # rm puede fallar si no existe, no es crítico
+                        logger.debug(f"rm falló (normal): {result.stderr}")
+                        continue
+                    elif 'mkdir' in cmd:
+                        # mkdir puede fallar si ya existe
+                        logger.debug(f"mkdir falló: {result.stderr}")
+                        continue
+                    else:
+                        logger.error(f"Comando SSH falló: {result.stderr}")
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': f'Error en comando SSH: {result.stderr}'
+                        }
+                
+                if progress_callback:
+                    progress_callback(f"Paso {i+1}/{len(commands)} completado")
+            
+            # PASO 3: Verificar que se copiaron archivos
+            list_cmd = ['ssh']
+            if self.ssh_key_path and os.path.exists(self.ssh_key_path):
+                list_cmd.extend(['-i', self.ssh_key_path])
+            list_cmd.extend([self.ssh_host, f'find {shlex.quote(remote_temp_path)} -type f | head -20'])
+            
+            list_result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=30)
+            
+            if list_result.returncode != 0:
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': f'No se pudieron listar archivos en directorio temporal: {list_result.stderr}'
+                }
+            
+            # Contar archivos copiados
+            files_list = list_result.stdout.strip().split('\n') if list_result.stdout.strip() else []
+            files_copied = len([f for f in files_list if f.strip()])
+            
+            if files_copied == 0:
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': 'No se encontraron archivos en el directorio temporal después de la copia'
+                }
+            
+            logger.info(f"Transferencia SSH completada exitosamente para {download_id}")
+            logger.info(f"Archivos encontrados: {files_copied}")
+            logger.info(f"Primeros archivos: {files_list[:5]}")
+            
+            return {
+                'status': 'ssh_complete',
+                'success': True,
+                'remote_path': remote_temp_path,
+                'files_copied': files_copied,
+                'next_action': 'compress_remote'
+            }
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout en transferencia SSH para {download_id}")
+            return {
+                'status': 'error',
+                'success': False,
+                'error': f'Timeout después de {self.timeout} segundos'
+            }
+        except Exception as e:
+            logger.error(f"Error ejecutando transferencia SSH para {download_id}: {e}")
+            return {
+                'status': 'error',
+                'success': False,
+                'error': str(e)
+            }
