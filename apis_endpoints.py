@@ -6,7 +6,7 @@ import logging
 import zipfile
 import tempfile
 import subprocess
-from flask import jsonify, request, send_file, abort
+from flask import jsonify, request, send_file, abort, render_template
 from werkzeug.utils import secure_filename
 import threading
 import time
@@ -23,18 +23,16 @@ class APIEndpoints:
         self.telegram_notifier = telegram_notifier
         self.config = config
         
-        # Registro de descargas activas - MEJORADO
+        # Registro de descargas activas
         self.active_downloads = {}
         self.download_cleanup_interval = 3600  # 1 hora
-        self.scheduled_deletions = {}  # NUEVO: Para borrados programados
+        self.scheduled_deletions = {}
         
         # Configurar rutas de API
         self.setup_api_routes()
         
         # Programar limpieza de descargas antiguas
         self._schedule_cleanup()
-        
-        # NUEVO: Programar borrados automáticos
         self._schedule_auto_deletion()
     
     def _schedule_cleanup(self):
@@ -182,6 +180,34 @@ class APIEndpoints:
     def setup_api_routes(self):
         """Configura todas las rutas de la API"""
         
+
+        
+        @self.app.route('/sistema.html')
+        def sistema():
+            """Página de estadísticas completas"""
+            try:
+                return render_template('sistema.html', config=self.config)
+            except Exception as e:
+                logger.error(f"Error renderizando sistema.html: {e}")
+                # Template embebido básico en caso de error
+                return '''
+                <!DOCTYPE html>
+                <html lang="es">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Sistema - Music Web Explorer</title>
+                    <style>body { font-family: Arial, sans-serif; margin: 20px; }</style>
+                </head>
+                <body>
+                    <h1>Sistema - Music Web Explorer</h1>
+                    <p>Error cargando template sistema.html: ''' + str(e) + '''</p>
+                    <p><a href="/">← Volver al inicio</a></p>
+                </body>
+                </html>
+                ''', 500
+
+
+
         # === BÚSQUEDAS ===
         @self.app.route('/api/search/artists')
         def api_search_artists():
@@ -193,8 +219,10 @@ class APIEndpoints:
                 return jsonify({'error': 'Consulta muy corta', 'results': []})
             
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
+                    
                 results = self.db_manager.search_artists(query, limit)
-                # Guardar búsqueda reciente
                 self.db_manager.add_recent_search(query)
                 return jsonify({'results': results, 'total': len(results)})
             except Exception as e:
@@ -211,6 +239,9 @@ class APIEndpoints:
                 return jsonify({'error': 'Consulta muy corta', 'results': {}})
             
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible', 'results': {}}), 500
+                    
                 results = self.db_manager.search_global(query, limit)
                 self.db_manager.add_recent_search(query)
                 return jsonify({'results': results})
@@ -223,6 +254,9 @@ class APIEndpoints:
         def api_get_artist(artist_id):
             """Obtener información de un artista"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 artist = self.db_manager.get_artist_by_id(artist_id)
                 if not artist:
                     return jsonify({'error': 'Artista no encontrado'}), 404
@@ -236,6 +270,9 @@ class APIEndpoints:
         def api_get_artist_albums(artist_id):
             """Obtener álbumes de un artista"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 artist = self.db_manager.get_artist_by_id(artist_id)
                 if not artist:
                     return jsonify({'error': 'Artista no encontrado'}), 404
@@ -251,6 +288,9 @@ class APIEndpoints:
             """Obtener artistas más populares"""
             limit = min(int(request.args.get('limit', 20)), 50)
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 artists = self.db_manager.get_popular_artists(limit)
                 return jsonify({'artists': artists, 'total': len(artists)})
             except Exception as e:
@@ -262,6 +302,9 @@ class APIEndpoints:
         def api_get_album(album_id):
             """Obtener información de un álbum"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
@@ -275,6 +318,9 @@ class APIEndpoints:
         def api_get_album_tracks(album_id):
             """Obtener canciones de un álbum"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 tracks = self.db_manager.get_album_tracks_by_id(album_id)
                 return jsonify({'tracks': tracks, 'total': len(tracks)})
             except Exception as e:
@@ -286,6 +332,9 @@ class APIEndpoints:
         def api_get_song(song_id):
             """Obtener información de una canción"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 song = self.db_manager.get_song_by_id(song_id)
                 if not song:
                     return jsonify({'error': 'Canción no encontrada'}), 404
@@ -299,6 +348,9 @@ class APIEndpoints:
         def api_get_song_lyrics(song_id):
             """Obtener letras de una canción"""
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 lyrics = self.db_manager.get_song_lyrics_by_id(song_id)
                 if not lyrics:
                     return jsonify({'error': 'Letras no encontradas'}), 404
@@ -451,6 +503,9 @@ class APIEndpoints:
             """Obtener búsquedas recientes"""
             limit = min(int(request.args.get('limit', 10)), 50)
             try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                    
                 searches = self.db_manager.get_recent_searches(limit)
                 return jsonify({'searches': searches})
             except Exception as e:
@@ -462,11 +517,13 @@ class APIEndpoints:
         def api_get_artist_image(artist_id):
             """Obtener imagen de un artista"""
             try:
+                if not self.img_manager:
+                    abort(404)
+                    
                 image_path = self.img_manager.get_artist_image(artist_id)
                 if image_path and os.path.exists(image_path):
                     return send_file(image_path)
                 else:
-                    # Devolver imagen por defecto
                     default_path = self.img_manager.get_default_artist_image()
                     return send_file(default_path)
             except Exception as e:
@@ -477,34 +534,20 @@ class APIEndpoints:
         def api_get_album_image(album_id):
             """Obtener carátula de un álbum"""
             try:
+                if not self.img_manager:
+                    abort(404)
+                    
                 image_path = self.img_manager.get_album_image(album_id)
                 if image_path and os.path.exists(image_path):
                     return send_file(image_path)
                 else:
-                    # Devolver imagen por defecto
                     default_path = self.img_manager.get_default_album_image()
                     return send_file(default_path)
             except Exception as e:
                 logger.error(f"Error obteniendo imagen del álbum {album_id}: {e}")
                 abort(404)
         
-        # === INFO DE SISTEMA ===
-        @self.app.route('/api/system/info')
-        def api_system_info():
-            """Información del sistema y base de datos"""
-            try:
-                db_info = self.db_manager.get_database_info()
-                return jsonify({
-                    'database': db_info,
-                    'config': {
-                        'music_root': self.config.get('paths', {}).get('music_root'),
-                        'downloads': self.config.get('paths', {}).get('downloads'),
-                        'telegram_enabled': self.config.get('telegram', {}).get('enabled', False)
-                    }
-                })
-            except Exception as e:
-                logger.error(f"Error obteniendo info del sistema: {e}")
-                return jsonify({'error': str(e)}), 500
+
         
         # === DIAGNÓSTICO ===
         @self.app.route('/api/debug/album/<int:album_id>')
@@ -1137,6 +1180,139 @@ class APIEndpoints:
                         'rule': rule.rule
                     })
             return jsonify({'routes': sorted(routes, key=lambda x: x['rule'])})
+
+
+        # === INFO DE SISTEMA ===
+        @self.app.route('/api/system/info')
+        def api_system_info():
+            """Información del sistema y base de datos"""
+            try:
+                db_info = self.db_manager.get_database_info()
+                return jsonify({
+                    'database': db_info,
+                    'config': {
+                        'music_root': self.config.get('paths', {}).get('music_root'),
+                        'downloads': self.config.get('paths', {}).get('downloads'),
+                        'telegram_enabled': self.config.get('telegram', {}).get('enabled', False)
+                    }
+                })
+            except Exception as e:
+                logger.error(f"Error obteniendo info del sistema: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        # === ESTADÍSTICAS ===
+
+        # === ESTADÍSTICAS CORREGIDAS ===
+        @self.app.route('/api/stats/overview')
+        def api_stats_overview():
+            """Resumen general de estadísticas"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                overview = stats_manager.get_system_overview()
+                return jsonify(overview)
+            except ImportError as e:
+                logger.warning(f"StatsManager no disponible: {e}")
+                # Fallback básico si stats_manager no está disponible
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                
+                try:
+                    db_info = self.db_manager.get_database_info()
+                    overview = {
+                        'database': {
+                            'size_mb': 0,  # Placeholder
+                            'total_tables': len(db_info.get('tables', {})),
+                            'last_updated': 'N/A'
+                        },
+                        'content': {
+                            'total_artists': db_info.get('tables', {}).get('artists', {}).get('count', 0),
+                            'total_albums': db_info.get('tables', {}).get('albums', {}).get('count', 0),
+                            'total_songs': db_info.get('tables', {}).get('songs', {}).get('count', 0),
+                            'total_duration_hours': 0  # Placeholder
+                        },
+                        'completeness': 75  # Placeholder
+                    }
+                    return jsonify(overview)
+                except Exception as fallback_error:
+                    logger.error(f"Error en fallback de estadísticas: {fallback_error}")
+                    return jsonify({'error': 'Error obteniendo estadísticas'}), 500
+            except Exception as e:
+                logger.error(f"Error obteniendo resumen de estadísticas: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/database')
+        def api_stats_database():
+            """Información detallada de la base de datos"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                db_info = stats_manager.get_database_info()
+                return jsonify(db_info)
+            except Exception as e:
+                logger.error(f"Error obteniendo info de base de datos: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/artists')
+        def api_stats_artists():
+            """Estadísticas de artistas"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                artists_stats = stats_manager.get_artists_stats()
+                return jsonify(artists_stats)
+            except Exception as e:
+                logger.error(f"Error obteniendo estadísticas de artistas: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/albums')
+        def api_stats_albums():
+            """Estadísticas de álbumes"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                albums_stats = stats_manager.get_albums_stats()
+                return jsonify(albums_stats)
+            except Exception as e:
+                logger.error(f"Error obteniendo estadísticas de álbumes: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/songs')
+        def api_stats_songs():
+            """Estadísticas de canciones"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                songs_stats = stats_manager.get_songs_stats()
+                return jsonify(songs_stats)
+            except Exception as e:
+                logger.error(f"Error obteniendo estadísticas de canciones: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/missing-data')
+        def api_stats_missing_data():
+            """Análisis de datos faltantes"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                missing_stats = stats_manager.get_missing_data_stats()
+                return jsonify(missing_stats)
+            except Exception as e:
+                logger.error(f"Error analizando datos faltantes: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/stats/charts/<category>/<chart_type>')
+        def api_stats_charts(category, chart_type):
+            """Gráficos estadísticos específicos"""
+            try:
+                from stats_manager import StatsManager
+                stats_manager = StatsManager(self.db_manager.db_path, self.config)
+                chart_data = stats_manager.get_chart_data_for_frontend(chart_type, category)
+                return jsonify(chart_data)
+            except Exception as e:
+                logger.error(f"Error generando gráfico {category}/{chart_type}: {e}")
+                return jsonify({'error': str(e)}), 500
+
 
 # Otras funciones
 

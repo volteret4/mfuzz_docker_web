@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+
+
 class ImageManager:
     """Gestor de imágenes para artistas y álbumes"""
     

@@ -673,7 +673,10 @@
             <button class="tab" data-tab="new">
                 <i class="fas fa-plus"></i> Nuevos
             </button>
-            <button class="tab" data-tab="stats">
+            <button class="tab" data-tab="config">
+                <i class="fas fa-cog"></i> Configuración
+            </button>
+            <button class="tab" data-tab="statistics">
                 <i class="fas fa-chart-bar"></i> Estadísticas
             </button>
         </div>
@@ -1201,7 +1204,7 @@
                 }
             }
 
-            // Funciones de extracción y descarga (ahora dentro de la clase)
+            // Funciones de extracción y descarga
             async extractAlbum(downloadId) {
                 try {
                     this.showToast('Iniciando extracción...', 'info');
@@ -1485,8 +1488,11 @@
                     case 'new':
                         this.showNewReleases();
                         break;
-                    case 'stats':
-                        await this.showStats();
+                    case 'config':
+                        await this.showConfig();
+                        break;
+                    case 'statistics':
+                        this.showStatistics();
                         break;
                 }
             }
@@ -1593,8 +1599,8 @@
                 this.showContent('new', content);
             }
 
-            async showStats() {
-                this.showLoading('Cargando estadísticas...');
+            async showConfig() {
+                this.showLoading('Cargando configuración...');
                 
                 try {
                     const response = await fetch('/api/system/info');
@@ -1609,7 +1615,7 @@
                     const tables = Object.keys(dbInfo.tables || {});
                     
                     const content = `
-                        <h2>Estadísticas del Sistema</h2>
+                        <h2>Configuración del Sistema</h2>
                         <div class="results-grid">
                             <div class="card">
                                 <div class="card-image">
@@ -1638,12 +1644,17 @@
                         </div>
                     `;
                     
-                    this.showContent('stats', content);
+                    this.showContent('config', content);
                     
                 } catch (error) {
-                    console.error('Error cargando estadísticas:', error);
-                    this.showError('Error cargando estadísticas');
+                    console.error('Error cargando configuración:', error);
+                    this.showError('Error cargando configuración');
                 }
+            }
+
+            showStatistics() {
+                // Redirigir a la página de estadísticas completa
+                window.open('/sistema.html', '_blank');
             }
 
             searchFromHistory(term) {
@@ -1703,7 +1714,7 @@
             }
         }
 
-        // Inicializar aplicación
+        // Inicializar la aplicación
         const app = new MusicWebExplorer();
     </script>
 </body>

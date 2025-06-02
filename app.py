@@ -8,18 +8,24 @@ from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.exceptions import NotFound
 import configparser
 
-# Importar módulos locales
-from db_manager import DatabaseManager
-from apis_endpoints import APIEndpoints
-from img_manager import ImageManager
-from telegram_notifier import create_notifier
-
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Importar módulos locales
+try:
+    from db_manager import DatabaseManager
+    from apis_endpoints import APIEndpoints
+    from img_manager import ImageManager
+    from telegram_notifier import create_notifier
+except ImportError as e:
+    logger.error(f"Error importando módulos: {e}")
+    raise
+
+
 
 class MusicWebExplorer:
     """Aplicación principal de Music Web Explorer"""
