@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' http: data:; img-src 'self' http: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
     <title>Music Explorer</title>
     <style>
         * {
@@ -1653,7 +1654,7 @@
                     return;
                 }
                 
-                displayArtistDetails(data);
+                await displayArtistDetails(data);  // Ahora es async
                 showTab('artist');
                 
                 // Añadir al historial
@@ -1666,28 +1667,10 @@
         }
 
 
-        // Función para generar URL de imagen
-        function getImageUrl(imagePath) {
-            if (!imagePath) return null;
-            
-            // Si ya es una URL completa, devolverla tal como está
-            if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-                return imagePath;
-            }
-            
-            // CRÍTICO: Usar EXACTAMENTE el mismo host y puerto que la página actual
-            const currentHost = window.location.host; // Incluye puerto si existe
-            const currentProtocol = window.location.protocol; // http: o https:
-            
-            // Codificar correctamente la ruta
-            const encodedPath = encodeURIComponent(imagePath);
-            
-            // Construir URL manteniendo el mismo protocolo y puerto
-            const imageUrl = `${currentProtocol}//${currentHost}/api/image/${encodedPath}`;
-            
-            console.log(`🖼️ URL generada: ${imageUrl}`);
-            return imageUrl;
-        }
+
+
+
+        
 
         // Función para probar diagnóstico de redirección
         async function debugImageRedirect(imagePath) {
@@ -1719,83 +1702,6 @@
             }
         }
 
-        // Función mejorada para probar acceso a imágenes
-        async function testImageAccess(imagePath) {
-            if (!imagePath) {
-                console.log('No hay ruta de imagen para probar');
-                return;
-            }
-            
-            console.log('=== PROBANDO ACCESO A IMAGEN ===');
-            console.log('Imagen:', imagePath);
-            
-            // Primero hacer debug de redirección
-            const debugInfo = await debugImageRedirect(imagePath);
-            
-            try {
-                // Probar la imagen directamente
-                const imageUrl = getImageUrl(imagePath);
-                console.log('URL generada:', imageUrl);
-                
-                const response = await fetch(imageUrl, {
-                    method: 'GET',
-                    mode: 'cors', // Asegurar que use CORS
-                    headers: {
-                        'Accept': 'image/*,*/*'
-                    }
-                });
-                
-                console.log('Response status:', response.status);
-                console.log('Response headers:', [...response.headers.entries()]);
-                console.log('Response URL final:', response.url);
-                
-                if (response.ok) {
-                    console.log('✅ Imagen accesible');
-                    console.log('Content-Type:', response.headers.get('content-type'));
-                    console.log('Content-Length:', response.headers.get('content-length'));
-                } else {
-                    console.log('❌ Error accediendo a imagen:', response.status, response.statusText);
-                }
-                
-                return {
-                    success: response.ok,
-                    status: response.status,
-                    finalUrl: response.url,
-                    headers: [...response.headers.entries()],
-                    debugInfo: debugInfo
-                };
-                
-            } catch (error) {
-                console.error('Error probando imagen:', error);
-                return {
-                    success: false,
-                    error: error.message,
-                    debugInfo: debugInfo
-                };
-            }
-        }
-
-
-        // Función mejorada para crear elemento de imagen con múltiples fallbacks
-        function createImageElement(imagePath, altText, className, fallbackIcon = '🎵') {
-            if (!imagePath) {
-                return `<div class="${className}-placeholder">${fallbackIcon}</div>`;
-            }
-            
-            const imageUrl = getImageUrl(imagePath);
-            const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
-            return `
-                <img id="${imageId}" 
-                    src="${imageUrl}" 
-                    alt="${altText}" 
-                    class="${className}" 
-                    style="display: none;"
-                    onload="this.style.display='block'; document.getElementById('${imageId}_placeholder').style.display='none';"
-                    onerror="this.style.display='none'; document.getElementById('${imageId}_placeholder').style.display='flex';">
-                <div class="${className}-placeholder" id="${imageId}_placeholder" style="display: flex;">${fallbackIcon}</div>
-            `;
-        }
 
 
         // Nueva función para manejar errores con fallback a endpoint alternativo
@@ -1825,14 +1731,14 @@
 
         // Mantener la función original para el caso final
         function handleImageError(img, fallbackIcon, className) {
-        //     console.error('Error final cargando imagen:', img.src);
+            console.log('Error cargando imagen:', img.src);
             
-        //     img.style.display = 'none';
-        //     const placeholder = document.getElementById(img.id + '_placeholder');
-        //     if (placeholder) {
-        //         placeholder.style.display = 'flex';
-        //         placeholder.innerHTML = fallbackIcon;
-        //     }
+            img.style.display = 'none';
+            const placeholder = document.getElementById(img.id + '_placeholder');
+            if (placeholder) {
+                placeholder.style.display = 'flex';
+                placeholder.innerHTML = fallbackIcon;
+            }
         }
 
         // Manejar carga exitosa de imagen
@@ -1845,71 +1751,20 @@
             // }
         }
 
-        // Función de debug para imágenes
-        async function debugArtistImages(artistId) {
-            try {
-                const response = await fetch(`/api/artist/${artistId}/debug`);
-                const debugInfo = await response.json();
-                console.log('=== DEBUG DE IMÁGENES DEL ARTISTA ===');
-                console.log('Artista:', debugInfo.artist_name);
-                
-                // Probar imagen principal del artista
-                if (debugInfo.artist_images.img.value) {
-                    console.log('Probando imagen principal:', debugInfo.artist_images.img.value);
-                    await testImageAccess(debugInfo.artist_images.img.value);
-                }
-                
-                // Probar img_paths
-                if (debugInfo.artist_images.img_paths.parsed.length > 0) {
-                    console.log('Probando img_paths:');
-                    for (const pathInfo of debugInfo.artist_images.img_paths.parsed) {
-                        if (pathInfo.exists) {
-                            console.log('  Probando path:', pathInfo.path);
-                            await testImageAccess(pathInfo.path);
-                        }
-                    }
-                }
-                
-                // Probar imágenes de álbumes
-                console.log('Álbumes encontrados:', debugInfo.albums.length);
-                for (const album of debugInfo.albums) {
-                    console.log(`--- Álbum: ${album.name} ---`);
-                    if (album.album_art_path.value && album.album_art_path.exists) {
-                        console.log('  Probando album_art_path:', album.album_art_path.value);
-                        await testImageAccess(album.album_art_path.value);
-                    }
-                    if (album.directory_images.length > 0) {
-                        console.log('  Imágenes en directorio:', album.directory_images.length);
-                        for (const dirImg of album.directory_images) {
-                            console.log('    Probando:', dirImg.path);
-                            await testImageAccess(dirImg.path);
-                        }
-                    }
-                }
-                
-                return debugInfo;
-            } catch (error) {
-                console.error('Error en debug de imágenes:', error);
-                return null;
-            }
-        }
-
-
-        // Mostrar detalles del artista
+     
         
-        function displayArtistDetails(data) {
+
+        async function displayArtistDetails(data) {
             const artist = data.artist;
             const albums = data.albums;
             
             const artistDetails = document.getElementById('artistDetails');
             
-            // Debug de imágenes (solo en desarrollo)
-            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                console.log('Debug de imágenes del artista:', artist.id);
-                if (typeof debugArtistImages === 'function') {
-                    debugArtistImages(artist.id);
-                }
-            }
+            // Debug: mostrar qué imágenes está devolviendo el backend
+            console.log('Imagen del artista a mostrar:', artist.img);
+            albums.forEach(album => {
+                console.log('Imagen del álbum a mostrar:', album.best_album_art);
+            });
             
             // Limpiar bio de HTML si existe
             const cleanBio = artist.bio ? artist.bio.replace(/<[^>]*>/g, '') : '';
@@ -1934,21 +1789,53 @@
                 bioToShow = 'No hay información biográfica disponible.';
             }
             
-            // Crear HTML para imagen del artista de forma más simple
-            console.log('Imagen del artista a mostrar:', artist.img);
+            // IMAGEN DEL ARTISTA - SISTEMA NUEVO
             let artistImageHtml;
             if (artist.img) {
-                const imageUrl = getImageUrl(artist.img);
                 artistImageHtml = `
-                    <img src="${imageUrl}" alt="${artist.name}" class="artist-image"
-                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-                        onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
+                    <img src="${artist.img}" alt="${artist.name}" class="artist-image" 
+                        onload="console.log('✅ Imagen de artista cargada:', this.src)"
+                        onerror="console.log('❌ Error imagen artista:', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex';">
                     <div class="artist-image-placeholder" style="display: none;">🎤</div>
                 `;
             } else {
                 artistImageHtml = `<div class="artist-image-placeholder">🎤</div>`;
             }
             
+            // ÁLBUMES - SISTEMA NUEVO
+            const albumsHtml = albums.map(album => {
+                let albumImageHtml;
+                if (album.best_album_art) {
+                    albumImageHtml = `
+                        <img src="${album.best_album_art}" alt="${album.name}" 
+                            style="width:100%;height:100%;object-fit:cover;border-radius:8px;"
+                            onload="console.log('✅ Imagen de álbum cargada:', this.src)"
+                            onerror="console.log('❌ Error imagen álbum:', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div style="display:none;width:100%;height:100%;border-radius:8px;background:#2a2a3a;color:#666;font-size:2em;display:flex;align-items:center;justify-content:center;">🎵</div>
+                    `;
+                } else {
+                    albumImageHtml = `<div style="width:100%;height:100%;border-radius:8px;background:#2a2a3a;color:#666;font-size:2em;display:flex;align-items:center;justify-content:center;">🎵</div>`;
+                }
+                
+                return `
+                    <div class="album-card">
+                        <div class="album-cover" onclick="selectAlbum(${album.id})">
+                            ${albumImageHtml}
+                        </div>
+                        <div class="album-title" onclick="selectAlbum(${album.id})">${album.name}</div>
+                        <div class="album-year">${album.year || 'Sin fecha'}</div>
+                        <div class="album-year">${album.track_count || 0} pistas</div>
+                        <div class="album-actions">
+                            <button class="download-btn" onclick="downloadAlbum(${album.id}, '${album.name}', '${artist.name}')" 
+                                    id="download-btn-${album.id}">
+                                📥 Descargar
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // Generar HTML completo
             artistDetails.innerHTML = `
                 <div class="artist-header">
                     <div style="flex-shrink: 0;">
@@ -1969,41 +1856,14 @@
                 
                 <h3 style="color: #cba6f7; margin-bottom: 20px;">Discografía (${albums.length} álbumes)</h3>
                 <div class="albums-grid">
-                    ${albums.map(album => {
-                        console.log('Imagen del álbum a mostrar:', album.best_album_art);
-                        let albumImageHtml;
-                        if (album.best_album_art) {
-                            const albumImageUrl = getImageUrl(album.best_album_art);
-                            albumImageHtml = `
-                                <img src="${albumImageUrl}" alt="${album.name}" 
-                                    style="width:100%;height:100%;object-fit:cover;border-radius:8px;"
-                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-                                    onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
-                                <div class="album-cover-placeholder" style="display: none; width:100%;height:100%;border-radius:8px;background:#2a2a3a;color:#666;font-size:2em;align-items:center;justify-content:center;">🎵</div>
-                            `;
-                        } else {
-                            albumImageHtml = `<div class="album-cover-placeholder" style="width:100%;height:100%;border-radius:8px;background:#2a2a3a;color:#666;font-size:2em;display:flex;align-items:center;justify-content:center;">🎵</div>`;
-                        }
-                        
-                        return `
-                            <div class="album-card">
-                                <div class="album-cover" onclick="selectAlbum(${album.id})">
-                                    ${albumImageHtml}
-                                </div>
-                                <div class="album-title" onclick="selectAlbum(${album.id})">${album.name}</div>
-                                <div class="album-year">${album.year || 'Sin fecha'}</div>
-                                <div class="album-year">${album.track_count || 0} pistas</div>
-                                <div class="album-actions">
-                                    <button class="download-btn" onclick="downloadAlbum(${album.id}, '${album.name}', '${artist.name}')" 
-                                            id="download-btn-${album.id}">
-                                        📥 Descargar
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
+                    ${albumsHtml}
                 </div>
             `;
+            
+            // Debug automático del artista
+            setTimeout(() => {
+                debugArtistImagesNew(artist.id);
+            }, 500);
             
             // Guardar datos completos para el toggle de biografía
             window.currentArtistData = {
@@ -2069,38 +1929,6 @@
                 if (buttonElement) {
                     buttonElement.classList.add('active');
                 }
-            }
-        }
-
-        // Cargar carpetas
-        async function testImageAccess(imagePath) {
-            if (!imagePath) {
-                console.log('No hay ruta de imagen para probar');
-                return;
-            }
-            
-            console.log('Probando acceso a imagen:', imagePath);
-            
-            try {
-                // Probar la imagen directamente
-                const imageUrl = getImageUrl(imagePath);
-                const response = await fetch(imageUrl);
-                
-                if (response.ok) {
-                    console.log('✅ Imagen accesible:', imageUrl);
-                } else {
-                    console.log('❌ Error accediendo a imagen:', response.status, response.statusText);
-                    
-                    // Obtener info de debug
-                    const debugUrl = `/api/image/debug/${encodeURIComponent(imagePath)}`;
-                    const debugResponse = await fetch(debugUrl);
-                    if (debugResponse.ok) {
-                        const debugInfo = await debugResponse.json();
-                        console.log('Debug info:', debugInfo);
-                    }
-                }
-            } catch (error) {
-                console.error('Error probando imagen:', error);
             }
         }
 
@@ -2323,6 +2151,7 @@
                 errorDiv.remove();
             }, 5000);
         }
+
         async function selectAlbum(albumId) {
             try {
                 const response = await fetch(`/api/album/${albumId}/details`);
@@ -2361,12 +2190,11 @@
                 document.querySelector('.main-content').appendChild(albumContainer);
             }
             
-            // Crear HTML para imagen del álbum de forma más simple
+            // Crear HTML para imagen del álbum usando sistema local
             let albumImageHtml;
             if (album.best_album_art) {
-                const imageUrl = getImageUrl(album.best_album_art);
                 albumImageHtml = `
-                    <img src="${imageUrl}" alt="${album.name}" class="album-image-large"
+                    <img src="${album.best_album_art}" alt="${album.name}" class="album-image-large"
                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
                         onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
                     <div class="album-image-large-placeholder" style="display: none;">💿</div>
@@ -2375,6 +2203,7 @@
                 albumImageHtml = `<div class="album-image-large-placeholder">💿</div>`;
             }
             
+            // Resto del código sin cambios...
             document.getElementById('albumDetails').innerHTML = `
                 <div class="album-header">
                     <button class="back-button" onclick="goBackToArtist()" style="
@@ -2780,21 +2609,385 @@
             folderList.innerHTML = foldersHtml;
         }
             
+        // Test usando createElement para bypass del fetch
+        async function testImageWithElement() {
+            console.log('=== TEST CON ELEMENTO IMG ===');
+            
+            const img = document.createElement('img');
+            const imagePath = '/mnt/NFS/moode/moode/E/Extremoduro/(2011) Material defectuoso (Warner Music Spain)/Disc 1/cover.jpg';
+            const imageUrl = `http://127.0.0.1:${window.location.port}/api/image/${encodeURIComponent(imagePath)}`;
+            
+            console.log('Probando con elemento img:', imageUrl);
+            
+            img.onload = function() {
+                console.log('✅ Imagen cargada exitosamente con elemento img');
+                console.log('Dimensiones:', this.naturalWidth, 'x', this.naturalHeight);
+                document.body.appendChild(this); // Mostrarla temporalmente
+            };
+            
+            img.onerror = function() {
+                console.log('❌ Error cargando imagen con elemento img');
+                console.log('URL final intentada:', this.src);
+            };
+            
+            img.src = imageUrl;
+        }
+        
+        // imagenes
+
+        //Generar URL para imagen del sistema local
+        function getLocalImageUrl(imagePath) {
+            if (!imagePath) return null;
+            
+            // Si ya es una URL del sistema local, devolverla tal como está
+            if (imagePath.startsWith('/api/local-image/')) {
+                return imagePath;
+            }
+            
+            // Para otras URLs (no debería ocurrir con el nuevo sistema)
+            console.warn('URL de imagen no es del sistema local:', imagePath);
+            return null;
+        }
+
+        //Crear elemento de imagen usando solo sistema local
+        function createImageElement(imagePath, altText, className, fallbackIcon = '🎵') {
+            if (!imagePath) {
+                return `<div class="${className}-placeholder">${fallbackIcon}</div>`;
+            }
+            
+            const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            return `
+                <img id="${imageId}" 
+                    src="${imagePath}" 
+                    alt="${altText}" 
+                    class="${className}" 
+                    style="display: none;"
+                    onload="this.style.display='block'; document.getElementById('${imageId}_placeholder').style.display='none';"
+                    onerror="this.style.display='none'; document.getElementById('${imageId}_placeholder').style.display='flex';">
+                <div class="${className}-placeholder" id="${imageId}_placeholder" style="display: flex;">${fallbackIcon}</div>
+            `;
+        }
+
+        async function debugNewImageSystem() {
+            console.log('=== DEBUG NUEVO SISTEMA DE IMÁGENES ===');
+            
+            try {
+                // 1. Verificar sistema general
+                console.log('1. Verificando sistema de imágenes...');
+                const systemResponse = await fetch('/api/debug/images-system');
+                const systemData = await systemResponse.json();
+                
+                console.log('Sistema de imágenes:', systemData);
+                
+                if (!systemData.master_index_exists) {
+                    console.error('❌ master_index.json NO EXISTE');
+                    return false;
+                }
+                
+                // 2. Listar archivos físicos
+                console.log('2. Listando archivos físicos...');
+                const filesResponse = await fetch('/api/debug/list-image-files');
+                const filesData = await filesResponse.json();
+                
+                console.log('Archivos físicos:', filesData);
+                console.log(`Artistas: ${filesData.artists_count} archivos`);
+                console.log(`Álbumes: ${filesData.albums_count} archivos`);
+                
+                // 3. Test con ID específico si hay datos
+                if (systemData.sample_data.first_3_albums) {
+                    const firstAlbumId = Object.keys(systemData.sample_data.first_3_albums)[0];
+                    console.log(`3. Testing álbum ID: ${firstAlbumId}`);
+                    
+                    const albumResponse = await fetch(`/api/debug/image-info/album/${firstAlbumId}`);
+                    const albumData = await albumResponse.json();
+                    
+                    console.log('Datos del álbum:', albumData);
+                    
+                    if (albumData.generated_url) {
+                        console.log(`4. Probando URL generada: ${albumData.generated_url}`);
+                        
+                        // Crear imagen de test
+                        const testImg = document.createElement('img');
+                        testImg.src = albumData.generated_url;
+                        testImg.style.cssText = `
+                            position: fixed; top: 20px; right: 20px; max-width: 200px;
+                            border: 2px solid #00ff00; z-index: 9999;
+                        `;
+                        
+                        testImg.onload = () => {
+                            console.log('✅ IMAGEN CARGADA CORRECTAMENTE');
+                            setTimeout(() => testImg.remove(), 5000);
+                        };
+                        
+                        testImg.onerror = () => {
+                            console.log('❌ ERROR CARGANDO IMAGEN');
+                            testImg.remove();
+                        };
+                        
+                        document.body.appendChild(testImg);
+                    }
+                }
+                
+                return true;
+                
+            } catch (error) {
+                console.error('Error en debug:', error);
+                return false;
+            }
+        }
+
+        async function debugArtistImagesNew(artistId) {
+            try {
+                console.log(`=== DEBUG ARTISTA ${artistId} ===`);
+                
+                const response = await fetch(`/api/debug/image-info/artist/${artistId}`);
+                const data = await response.json();
+                
+                console.log('Info del artista:', data);
+                
+                if (data.generated_url) {
+                    console.log('✅ URL generada:', data.generated_url);
+                    console.log('Archivo existe:', data.file_exists);
+                } else {
+                    console.log('❌ No se generó URL para el artista');
+                }
+                
+                return data;
+            } catch (error) {
+                console.error('Error en debug de artista:', error);
+                return null;
+            }
+        }
+
+        // NUEVA función para test manual rápido
+        async function quickImageTest() {
+            console.log('=== TEST RÁPIDO DE IMÁGENES ===');
+            
+            try {
+                // 1. Verificar sistema
+                const systemOk = await debugNewImageSystem();
+                if (!systemOk) {
+                    console.log('❌ Sistema no configurado correctamente');
+                    return;
+                }
+                
+                // 2. Buscar un artista para probar
+                console.log('2. Buscando artista para test...');
+                const searchResponse = await fetch('/api/search/artists?q=a&limit=1');
+                const artists = await searchResponse.json();
+                
+                if (artists.length > 0) {
+                    console.log('3. Artista encontrado:', artists[0].name);
+                    console.log('4. Imagen URL:', artists[0].img);
+                    
+                    if (artists[0].img) {
+                        console.log('✅ ¡El sistema está devolviendo URLs de imágenes!');
+                        return true;
+                    } else {
+                        console.log('❌ El artista no tiene imagen en el nuevo sistema');
+                        return false;
+                    }
+                } else {
+                    console.log('❌ No se encontraron artistas');
+                    return false;
+                }
+                
+            } catch (error) {
+                console.error('Error en test rápido:', error);
+                return false;
+            }
+        }
+        
 
 
-        window.debugImageRedirect = debugImageRedirect;
-        window.testImageAccess = testImageAccess;
+        // Test completo del nuevo sistema de imágenes
+        async function testNewImageSystem() {
+            console.log('=== TEST COMPLETO NUEVO SISTEMA ===');
+            
+            try {
+                // 1. Test con primera imagen disponible
+                console.log('1. Probando primera imagen disponible...');
+                const testResponse = await fetch('/api/debug/test-first-image');
+                const testData = await testResponse.json();
+                
+                console.log('Datos del test:', testData);
+                
+                if (testData.test_results.first_artist) {
+                    const artist = testData.test_results.first_artist;
+                    console.log('2. Artista de prueba:', artist.name);
+                    console.log('   Filename:', artist.filename);
+                    console.log('   URL generada:', artist.generated_url);
+                    console.log('   Archivo existe:', artist.file_exists);
+                    
+                    if (artist.generated_url && artist.file_exists) {
+                        console.log('3. Probando carga de imagen...');
+                        await testImageLoad(artist.generated_url, 'ARTISTA TEST');
+                    }
+                }
+                
+                if (testData.test_results.first_album) {
+                    const album = testData.test_results.first_album;
+                    console.log('4. Álbum de prueba:', album.name);
+                    console.log('   Filename:', album.filename);
+                    console.log('   URL generada:', album.generated_url);
+                    console.log('   Archivo existe:', album.file_exists);
+                    
+                    if (album.generated_url && album.file_exists) {
+                        console.log('5. Probando carga de imagen de álbum...');
+                        await testImageLoad(album.generated_url, 'ÁLBUM TEST');
+                    }
+                }
+                
+                return testData;
+                
+            } catch (error) {
+                console.error('Error en test del sistema:', error);
+                return null;
+            }
+        }
 
-        // AL FINAL DEL SCRIPT - Hacer funciones globales
+        // Test de carga de imagen específica
+        function testImageLoad(imageUrl, label) {
+            return new Promise((resolve, reject) => {
+                const img = document.createElement('img');
+                img.style.cssText = `
+                    position: fixed; 
+                    top: ${Math.random() * 200 + 50}px; 
+                    right: ${Math.random() * 200 + 50}px; 
+                    max-width: 150px; max-height: 150px;
+                    border: 3px solid #00ff00; 
+                    z-index: 9999;
+                    box-shadow: 0 0 10px rgba(0,255,0,0.5);
+                `;
+                
+                img.onload = function() {
+                    console.log(`✅ ${label} - Imagen cargada correctamente:`, imageUrl);
+                    console.log(`   Dimensiones: ${this.naturalWidth}x${this.naturalHeight}`);
+                    
+                    // Añadir etiqueta
+                    const label_div = document.createElement('div');
+                    label_div.style.cssText = `
+                        position: fixed;
+                        top: ${parseInt(this.style.top) - 25}px;
+                        right: ${this.style.right};
+                        background: #00ff00;
+                        color: black;
+                        padding: 2px 8px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        z-index: 10000;
+                    `;
+                    label_div.textContent = label;
+                    document.body.appendChild(label_div);
+                    
+                    // Auto-remover después de 5 segundos
+                    setTimeout(() => {
+                        this.remove();
+                        label_div.remove();
+                    }, 5000);
+                    
+                    resolve(true);
+                };
+                
+                img.onerror = function() {
+                    console.log(`❌ ${label} - Error cargando imagen:`, imageUrl);
+                    this.remove();
+                    reject(false);
+                };
+                
+                img.src = imageUrl;
+                document.body.appendChild(img);
+            });
+        }
+
+        // Debug de búsqueda con imágenes
+        async function debugSearchWithImages(query = 'a') {
+            console.log(`=== DEBUG BÚSQUEDA CON IMÁGENES: "${query}" ===`);
+            
+            try {
+                const response = await fetch(`/api/search/artists?q=${encodeURIComponent(query)}&limit=3`);
+                const artists = await response.json();
+                
+                console.log(`Encontrados ${artists.length} artistas`);
+                
+                for (let i = 0; i < artists.length; i++) {
+                    const artist = artists[i];
+                    console.log(`${i+1}. Artista: ${artist.name}`);
+                    console.log(`   ID: ${artist.id}`);
+                    console.log(`   Imagen URL: ${artist.img}`);
+                    
+                    if (artist.img) {
+                        console.log(`   Probando imagen del artista...`);
+                        try {
+                            await testImageLoad(artist.img, `ARTISTA ${i+1}`);
+                        } catch (e) {
+                            console.log(`   ❌ Falló la carga de imagen para ${artist.name}`);
+                        }
+                    } else {
+                        console.log(`   ⚠️ No tiene imagen`);
+                    }
+                }
+                
+                return artists;
+                
+            } catch (error) {
+                console.error('Error en debug de búsqueda:', error);
+                return null;
+            }
+        }
+
+        // Test de endpoints específicos
+        async function debugImageEndpoints() {
+            console.log('=== DEBUG ENDPOINTS DE IMÁGENES ===');
+            
+            try {
+                // 1. Test del sistema general
+                const systemResponse = await fetch('/api/debug/images-system');
+                const systemData = await systemResponse.json();
+                console.log('1. Sistema de imágenes:', systemData);
+                
+                // 2. Test de archivos físicos
+                const filesResponse = await fetch('/api/debug/list-image-files');
+                const filesData = await filesResponse.json();
+                console.log('2. Archivos físicos:', filesData);
+                
+                // 3. Test de estadísticas de imágenes
+                const statsResponse = await fetch('/api/images/stats');
+                const statsData = await statsResponse.json();
+                console.log('3. Estadísticas de imágenes:', statsData);
+                
+                return {
+                    system: systemData,
+                    files: filesData,
+                    stats: statsData
+                };
+                
+            } catch (error) {
+                console.error('Error en debug de endpoints:', error);
+                return null;
+            }
+        }
+
         window.debugLoadStats = debugLoadStats;
         window.debugLoadPopular = debugLoadPopular;
         window.debugSearch = debugSearch;
         window.runFullDiagnosis = runFullDiagnosis;
         window.checkAndDiagnose = checkAndDiagnose;
         window.testFrontend = testFrontend;
+
+        // Funciones de sistema de imágenes
+        window.testNewImageSystem = testNewImageSystem;
+        window.testImageLoad = testImageLoad;
+        window.debugSearchWithImages = debugSearchWithImages;
+        window.debugImageEndpoints = debugImageEndpoints;
+        window.debugNewImageSystem = debugNewImageSystem;
+        window.debugArtistImagesNew = debugArtistImagesNew;
+        window.quickImageTest = quickImageTest;
+        window.debugImageRedirect = debugImageRedirect;
+
+        // Funciones de navegación y UI
         window.AppHistory = AppHistory;
-        
-        // Otras funciones globales que ya tenías
         window.toggleBio = toggleBio;
         window.downloadAlbum = downloadAlbum;
         window.selectAlbum = selectAlbum;
@@ -2803,9 +2996,15 @@
         window.selectArtist = selectArtist;
         window.handleImageError = handleImageError;
         window.handleImageLoad = handleImageLoad;
-        window.debugArtistImages = debugArtistImages;
         window.goBackToArtist = goBackToArtist;
         window.goBackToAlbum = goBackToAlbum;
+
+        // Test rápido del sistema de imágenes
+        console.log('🖼️ Funciones de debug de imágenes disponibles:');
+        console.log('  - testNewImageSystem()');
+        console.log('  - quickImageTest()');
+        console.log('  - debugSearchWithImages("query")');
+        console.log('  - debugImageEndpoints()');
     </script>
 </body>
 </html>

@@ -84,7 +84,7 @@ else
 fi
 
 # Crear directorios necesarios
-mkdir -p /app/data /app/music /downloads /app/logs /app/static
+mkdir -p /app/data /app/music /downloads /app/logs /app/static /app/images
 
 # Manejar creación de usuario de forma más robusta
 echo "➕ Configurando usuario de ejecución..."
@@ -129,6 +129,32 @@ fi
 
 if [ -w "/app/static" ]; then
     chown -R www-data:www-data /app/static 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /app/static"
+fi
+
+# NUEVO: Configurar directorio de imágenes
+echo "🖼️  Configurando directorio de imágenes..."
+if [ -w "/app/images" ]; then
+    chown -R "$CONTAINER_USER":"$CONTAINER_USER" /app/images 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /app/images"
+fi
+
+# Verificar si hay imágenes disponibles
+if [ -d "/app/images" ] && [ "$(ls -A /app/images 2>/dev/null)" ]; then
+    IMAGE_COUNT=$(find /app/images -type f \( -name "*.jpg" -o -name "*.png" -o -name "*.jpeg" \) | wc -l)
+    TOTAL_SIZE=$(du -sh /app/images 2>/dev/null | cut -f1)
+    echo "✅ Imágenes disponibles: $IMAGE_COUNT archivos ($TOTAL_SIZE)"
+    
+    # Verificar índice maestro
+    if [ -f "/app/images/master_index.json" ]; then
+        echo "✅ Índice maestro de imágenes encontrado"
+    else
+        echo "⚠️  Índice maestro de imágenes no encontrado"
+    fi
+else
+    echo "⚠️  No se encontraron imágenes en /app/images"
+    echo "   Las carátulas e imágenes de artistas no estarán disponibles"
+    echo "   Para solucionarlo:"
+    echo "   1. Ejecuta 'extract_images.py' ANTES de construir el contenedor"
+    echo "   2. Monta el directorio con imágenes en /app/images"
 fi
 
 # Verificar base de datos (pero NO cambiar permisos - es solo lectura)
@@ -256,18 +282,21 @@ EOF
 else
     echo "⚠️  Supervisor no encontrado, iniciando Flask directamente..."
     echo "👤 Cambiando a usuario: $CONTAINER_USER"
+    echo "🚀 Iniciando Flask directamente en puerto 8447..."
     cd /app
-    
-    # Cambiar al usuario correcto y ejecutar Flask
+
+    # Configurar variables de entorno
+    export USER="$CONTAINER_USER"
+    export CONTAINER_UID="$CONTAINER_UID"
+    export PYTHONUNBUFFERED=1
+
     if [ "$CONTAINER_USER" = "root" ]; then
-        export USER="root"
-        export CONTAINER_UID="$CONTAINER_UID"
         export HOME="/root"
+        echo "🔧 Ejecutando como root..."
         exec python3 app.py
     else
-        export USER="$CONTAINER_USER"
-        export CONTAINER_UID="$CONTAINER_UID"
         export HOME="/home/$CONTAINER_USER"
-        exec su - "$CONTAINER_USER" -c "cd /app && USER='$CONTAINER_USER' CONTAINER_UID='$CONTAINER_UID' HOME='/home/$CONTAINER_USER' python3 app.py"
+        echo "🔧 Ejecutando como usuario $CONTAINER_USER..."
+        exec su - "$CONTAINER_USER" -c "cd /app && USER='$CONTAINER_USER' CONTAINER_UID='$CONTAINER_UID' HOME='/home/$CONTAINER_USER' PYTHONUNBUFFERED=1 python3 app.py"
     fi
 fi

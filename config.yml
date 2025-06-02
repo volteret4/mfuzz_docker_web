@@ -1,0 +1,52 @@
+# Configuración de la aplicación Music Web Explorer
+app:
+  name: "Music Web Explorer"
+  version: "1.0.0"
+  debug: false
+  host: "0.0.0.0"
+  port: 5157
+
+# Base de datos
+database:
+  path: "/app/data/musica.sqlite"
+  timeout: 30
+
+# Rutas y directorios
+paths:
+  music_root: "/mnt/NFS/moode/moode"
+  downloads: "/downloads"
+  images: "/app/images"
+  svg_icons: "/home/huan/gits/pollo/music-fuzzy/ui/svg"
+  logs: "/app/logs"
+
+# Configuración web
+web:
+  static_folder: "static"
+  template_folder: "templates"
+  max_content_length: 16777216  # 16MB
+
+# Configuración de imágenes
+images:
+  default_album_cover: "/app/static/images/default_album.jpg"
+  cache_enabled: true
+  supported_formats: ["jpg", "jpeg", "png", "webp"]
+  max_size: 1024  # píxeles
+
+# Logging
+logging:
+  level: "INFO"
+  file: "/app/logs/app.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# Telegram (desde variables de entorno)
+telegram:
+  enabled: false  # Se sobrescribe con TELEGRAM_ENABLED
+  bot_token: ""   # Se sobrescribe con TELEGRAM_BOT_TOKEN
+  chat_id: ""     # Se sobrescribe con TELEGRAM_CHAT_ID
+
+# Configuración de la interfaz
+ui:
+  items_per_page: 50
+  search_min_chars: 2
+  history_max_items: 100

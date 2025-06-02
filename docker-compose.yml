@@ -23,8 +23,11 @@ services:
       - /home/huan/gits/pollo/mfuzz_docker_web/config.ini:/app/config.ini:ro
     
       - /mnt/NFS/moode/moode:/mnt/NFS/moode/moode:ro
+
+      # NUEVO: Imágenes pre-procesadas (temporal para primera vez)
+      - /home/huan/contenedores/mfuzz/container_images:/app/images
  
-      - /home/huan/gits/pollo/music-fuzzy/.content/:/home/huan/gits/pollo/music-fuzzy/.content/:ro
+      #- /home/huan/gits/pollo/music-fuzzy/.content/:/home/huan/gits/pollo/music-fuzzy/.content/:ro
 
       - /home/huan/gits/pollo/music-fuzzy/ui/svg/:/home/huan/gits/pollo/music-fuzzy/ui/svg/:ro
     
