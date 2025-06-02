@@ -291,6 +291,177 @@
                 font-size: 1.5rem;
             }
         }
+
+        .artist-selector-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            backdrop-filter: blur(5px);
+        }
+
+        .artist-selector-container h3 {
+            color: #a8e6cf;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        /* Selector filtrable */
+        .filterable-select-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .filterable-select-input {
+            width: 100%;
+            padding: 12px;
+            font-size: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            outline: none;
+        }
+
+        .filterable-select-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .filterable-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(42, 82, 152, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .filterable-select-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: background 0.3s ease;
+        }
+
+        .filterable-select-item:hover {
+            background: rgba(168, 230, 207, 0.2);
+        }
+
+        /* Pestañas de análisis de artista */
+        .artist-analysis-tabs {
+            display: flex;
+            gap: 8px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .artist-analysis-tab {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            padding: 8px 15px;
+            border-radius: 20px;
+            color: white;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .artist-analysis-tab:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .artist-analysis-tab.active {
+            background: #2a5298;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .artist-analysis-content {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+            min-height: 400px;
+        }
+
+        .analysis-charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .analysis-chart-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            backdrop-filter: blur(5px);
+        }
+
+        .analysis-chart-container h4 {
+            color: #a8e6cf;
+            margin-bottom: 10px;
+            font-size: 1rem;
+            text-align: center;
+        }
+
+        .artist-stats-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .artist-stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .artist-stat-card h5 {
+            color: #a8e6cf;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        .artist-stat-card p {
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .artist-analysis-tabs {
+                gap: 6px;
+            }
+            
+            .artist-analysis-tab {
+                padding: 6px 10px;
+                font-size: 0.8rem;
+            }
+            
+            .analysis-charts-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -343,6 +514,9 @@
     <script>
         // Variables globales
         let systemOverview = null;
+        let currentArtistId = null;
+        let artistsList = [];
+
 
         // Cargar datos al inicializar la página
         document.addEventListener('DOMContentLoaded', function() {
@@ -735,6 +909,369 @@
             const overviewContainer = document.getElementById('system-overview');
             overviewContainer.innerHTML = `<div class="error-message">${message}</div>`;
         }
+
+        async function loadArtistsList() {
+            try {
+                const response = await fetch('/api/artists/list');
+                const data = await response.json();
+                
+                if (data.artists) {
+                    artistsList = data.artists;
+                }
+            } catch (error) {
+                console.error('Error cargando lista de artistas:', error);
+            }
+        }
+
+        // Configurar búsqueda de artistas
+        function setupArtistSearch() {
+            const input = document.getElementById('artistSearchInput');
+            const dropdown = document.getElementById('artistDropdown');
+            
+            input.addEventListener('focus', () => {
+                if (artistsList.length > 0) {
+                    filterArtists(input.value);
+                }
+            });
+            
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.filterable-select-wrapper')) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        // Filtrar artistas
+        function filterArtists(searchTerm) {
+            const dropdown = document.getElementById('artistDropdown');
+            
+            if (!searchTerm.trim()) {
+                dropdown.innerHTML = '';
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            const filtered = artistsList.filter(artist => 
+                artist.name.toLowerCase().includes(searchTerm.toLowerCase())
+            ).slice(0, 20); // Limitar a 20 resultados
+            
+            dropdown.innerHTML = '';
+            
+            filtered.forEach(artist => {
+                const item = document.createElement('div');
+                item.className = 'filterable-select-item';
+                item.textContent = artist.name;
+                item.onclick = () => selectArtist(artist);
+                dropdown.appendChild(item);
+            });
+            
+            dropdown.style.display = filtered.length > 0 ? 'block' : 'none';
+        }
+
+        // Seleccionar artista
+        function selectArtist(artist) {
+            currentArtistId = artist.id;
+            
+            document.getElementById('artistSearchInput').value = artist.name;
+            document.getElementById('artistDropdown').style.display = 'none';
+            document.getElementById('selectedArtistContent').style.display = 'block';
+            
+            // Mostrar primera pestaña
+            showArtistAnalysisTab('tiempo');
+        }
+
+        // Mostrar pestaña de análisis
+        async function showArtistAnalysisTab(tabName) {
+            if (!currentArtistId) return;
+            
+            // Actualizar pestañas activas
+            document.querySelectorAll('.artist-analysis-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const content = document.getElementById('artistAnalysisContent');
+            content.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i><p>Cargando análisis...</p></div>';
+            
+            try {
+                const response = await fetch(`/api/artists/${currentArtistId}/analysis/${tabName}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    content.innerHTML = `<div class="error-message">${data.error}</div>`;
+                    return;
+                }
+                
+                renderArtistAnalysis(tabName, data, content);
+                
+            } catch (error) {
+                console.error(`Error cargando análisis ${tabName}:`, error);
+                content.innerHTML = `<div class="error-message">Error cargando análisis de ${tabName}</div>`;
+            }
+        }
+
+        // Renderizar análisis según el tipo
+        function renderArtistAnalysis(tabName, data, container) {
+            let html = '';
+            
+            switch(tabName) {
+                case 'tiempo':
+                    html = renderTimeAnalysis(data);
+                    break;
+                case 'conciertos':
+                    html = renderConcertsAnalysis(data);
+                    break;
+                case 'generos':
+                    html = renderGenresAnalysis(data);
+                    break;
+                case 'sellos':
+                    html = renderLabelsAnalysis(data);
+                    break;
+                case 'discografia':
+                    html = renderDiscographyAnalysis(data);
+                    break;
+                case 'escuchas':
+                    html = renderListensAnalysis(data);
+                    break;
+                case 'colaboradores':
+                    html = renderCollaboratorsAnalysis(data);
+                    break;
+                case 'feeds':
+                    html = renderFeedsAnalysis(data);
+                    break;
+            }
+            
+            container.innerHTML = html;
+            
+            // Renderizar gráficos
+            if (data.charts) {
+                Object.keys(data.charts).forEach(chartId => {
+                    renderArtistChart(chartId, data.charts[chartId]);
+                });
+            }
+        }
+
+        // Funciones de renderizado específicas
+        function renderTimeAnalysis(data) {
+            return `
+                <h3>Análisis Temporal</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Distribución por Décadas</h4>
+                        <div id="chart-decades-pie" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Álbumes por Año</h4>
+                        <div id="chart-albums-timeline" style="height: 300px;"></div>
+                    </div>
+                </div>
+                <div class="artist-stats-summary">
+                    <div class="artist-stat-card">
+                        <h5>Período Activo</h5>
+                        <p>${data.stats?.first_year || 'N/A'} - ${data.stats?.last_year || 'Presente'}</p>
+                    </div>
+                    <div class="artist-stat-card">
+                        <h5>Década Más Productiva</h5>
+                        <p>${data.stats?.most_productive_decade || 'N/A'}</p>
+                    </div>
+                    <div class="artist-stat-card">
+                        <h5>Total Álbumes</h5>
+                        <p>${data.stats?.total_albums || 0}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderConcertsAnalysis(data) {
+            return `
+                <h3>Análisis de Conciertos</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Conciertos por Año</h4>
+                        <div id="chart-concerts-timeline" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Canciones Más Tocadas</h4>
+                        <div id="chart-most-played-songs" style="height: 300px;"></div>
+                    </div>
+                </div>
+                <div class="artist-stats-summary">
+                    <div class="artist-stat-card">
+                        <h5>Total Conciertos</h5>
+                        <p>${data.stats?.total_concerts || 0}</p>
+                    </div>
+                    <div class="artist-stat-card">
+                        <h5>Países Visitados</h5>
+                        <p>${data.stats?.countries_visited || 0}</p>
+                    </div>
+                    <div class="artist-stat-card">
+                        <h5>Último Concierto</h5>
+                        <p>${data.stats?.last_concert_date || 'N/A'}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderGenresAnalysis(data) {
+            return `
+                <h3>Análisis de Géneros</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Géneros de Álbumes</h4>
+                        <div id="chart-album-genres" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Géneros Discogs</h4>
+                        <div id="chart-discogs-genres" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Estilos Discogs</h4>
+                        <div id="chart-discogs-styles" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Tags Last.fm</h4>
+                        <div id="chart-lastfm-tags" style="height: 300px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLabelsAnalysis(data) {
+            return `
+                <h3>Análisis de Sellos</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Distribución por Sellos</h4>
+                        <div id="chart-labels-pie" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Álbumes Acumulados por Sello</h4>
+                        <div id="chart-labels-timeline" style="height: 300px;"></div>
+                    </div>
+                </div>
+                <div class="artist-stats-summary">
+                    <div class="artist-stat-card">
+                        <h5>Total Sellos</h5>
+                        <p>${data.stats?.total_labels || 0}</p>
+                    </div>
+                    <div class="artist-stat-card">
+                        <h5>Sello Principal</h5>
+                        <p>${data.stats?.main_label || 'N/A'}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDiscographyAnalysis(data) {
+            return `
+                <h3>Análisis de Discografía</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Formatos</h4>
+                        <div id="chart-formats" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Tipos de Lanzamiento</h4>
+                        <div id="chart-types" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>En Colección</h4>
+                        <div id="chart-collection" style="height: 300px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderListensAnalysis(data) {
+            return `
+                <h3>Análisis de Escuchas</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Escuchas Last.fm por Canción</h4>
+                        <div id="chart-lastfm-tracks" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Escuchas Last.fm Acumuladas</h4>
+                        <div id="chart-lastfm-cumulative" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Escuchas ListenBrainz por Canción</h4>
+                        <div id="chart-listenbrainz-tracks" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Escuchas ListenBrainz Acumuladas</h4>
+                        <div id="chart-listenbrainz-cumulative" style="height: 300px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCollaboratorsAnalysis(data) {
+            return `
+                <h3>Análisis de Colaboradores</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Productores</h4>
+                        <div id="chart-producers" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Ingenieros</h4>
+                        <div id="chart-engineers" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Colaboradores</h4>
+                        <div id="chart-collaborators" style="height: 300px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderFeedsAnalysis(data) {
+            let feedsTable = '';
+            
+            if (data.feeds && data.feeds.length > 0) {
+                feedsTable = `
+                    <div class="feeds-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Publicación</th>
+                                    <th>Título</th>
+                                    <th>Enlace</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.feeds.map(feed => `
+                                    <tr>
+                                        <td>${feed.post_date || 'N/A'}</td>
+                                        <td>${feed.feed_name || 'N/A'}</td>
+                                        <td>${feed.post_title || 'N/A'}</td>
+                                        <td><a href="${feed.post_url}" target="_blank">Ver</a></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } else {
+                feedsTable = '<div class="no-results">No se encontraron feeds para este artista</div>';
+            }
+            
+            return `
+                <h3>Análisis de Feeds</h3>
+                <div class="analysis-charts-grid">
+                    <div class="analysis-chart-container">
+                        <h4>Feeds por Publicación</h4>
+                        <div id="chart-feeds-sources" style="height: 300px;"></div>
+                    </div>
+                    <div class="analysis-chart-container">
+                        <h4>Actividad por Mes</h4>
+                        <div id="chart-feeds-timeline" style="height: 300px;"></div>
+                    </div>
+                </div>
+                ${feedsTable}
+            `;
+        }
+
     </script>
 </body>
 </html>

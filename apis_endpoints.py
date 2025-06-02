@@ -10,7 +10,7 @@ from flask import jsonify, request, send_file, abort, render_template
 from werkzeug.utils import secure_filename
 import threading
 import time
-
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -1481,6 +1481,72 @@ class APIEndpoints:
                 logger.error(f"Error obteniendo modo de descarga: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/artists/list')
+        def api_get_artists_list():
+            """Lista todos los artistas para el selector"""
+            try:
+                limit = min(int(request.args.get('limit', 1000)), 2000)
+                
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                
+                # Consulta simple para obtener artistas
+                query = """
+                    SELECT id, name
+                    FROM artists 
+                    WHERE name IS NOT NULL AND name != ''
+                    ORDER BY name
+                    LIMIT ?
+                """
+                
+                rows = self.db_manager.execute_query(query, (limit,))
+                
+                artists = [
+                    {
+                        'id': row['id'],
+                        'name': row['name']
+                    }
+                    for row in rows
+                ]
+                
+                return jsonify({'artists': artists, 'total': len(artists)})
+                
+            except Exception as e:
+                logger.error(f"Error obteniendo lista de artistas: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/artists/<int:artist_id>/analysis/<analysis_type>')
+        def api_artist_analysis(artist_id, analysis_type):
+            """Endpoint unificado para análisis de artistas"""
+            try:
+                # Verificar que el artista existe
+                artist = self.db_manager.get_artist_by_id(artist_id)
+                if not artist:
+                    return jsonify({'error': 'Artista no encontrado'}), 404
+                
+                # Crear análisis básico según el tipo
+                if analysis_type == 'tiempo':
+                    return jsonify(self._get_time_analysis_simple(artist_id))
+                elif analysis_type == 'conciertos':
+                    return jsonify(self._get_concerts_analysis_simple(artist_id))
+                elif analysis_type == 'generos':
+                    return jsonify(self._get_genres_analysis_simple(artist_id))
+                elif analysis_type == 'sellos':
+                    return jsonify(self._get_labels_analysis_simple(artist_id))
+                elif analysis_type == 'discografia':
+                    return jsonify(self._get_discography_analysis_simple(artist_id))
+                elif analysis_type == 'escuchas':
+                    return jsonify(self._get_listens_analysis_simple(artist_id))
+                elif analysis_type == 'colaboradores':
+                    return jsonify(self._get_collaborators_analysis_simple(artist_id))
+                elif analysis_type == 'feeds':
+                    return jsonify(self._get_feeds_analysis_simple(artist_id))
+                else:
+                    return jsonify({'error': f'Tipo de análisis no soportado: {analysis_type}'}), 400
+                    
+            except Exception as e:
+                logger.error(f"Error en análisis {analysis_type} para artista {artist_id}: {e}")
+                return jsonify({'error': str(e)}), 500
 
 # Otras funciones
 
@@ -2130,3 +2196,624 @@ class APIEndpoints:
                 )
             except Exception as notify_error:
                 logger.warning(f"Error notificando error SSH: {notify_error}")
+
+
+
+    def _get_time_analysis_simple(self, artist_id):
+        """Análisis temporal simplificado"""
+        try:
+            # Obtener álbumes con años
+            query = """
+                SELECT year, COUNT(*) as count
+                FROM albums 
+                WHERE artist_id = ? AND year IS NOT NULL AND year != ''
+                GROUP BY year 
+                ORDER BY year
+            """
+            albums_data = self.db_manager.execute_query(query, (artist_id,))
+            
+            if not albums_data:
+                return {'error': 'No se encontraron datos temporales para este artista'}
+            
+            # Procesar datos
+            from collections import defaultdict
+            decades_data = defaultdict(int)
+            years_data = []
+            
+            for row in albums_data:
+                try:
+                    year = int(row['year'])
+                    count = row['count']
+                    
+                    # Décadas
+                    decade = (year // 10) * 10
+                    decades_data[f"{decade}s"] += count
+                    
+                    # Años
+                    years_data.append({'year': year, 'albums': count})
+                except:
+                    continue
+            
+            # Crear gráficos usando stats_manager
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            decades_chart_data = [{'decade': d, 'count': c} for d, c in decades_data.items()]
+            
+            charts = {
+                'decades_pie': stats_manager.create_chart('pie', decades_chart_data, 'Distribución por Décadas', 'decade', 'count'),
+                'albums_timeline': stats_manager.create_chart('line', years_data, 'Álbumes por Año', 'year', 'albums')
+            }
+            
+            # Estadísticas
+            years = [d['year'] for d in years_data]
+            most_productive_decade = max(decades_data.items(), key=lambda x: x[1])[0] if decades_data else 'N/A'
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_albums': sum(d['albums'] for d in years_data),
+                    'first_year': min(years) if years else None,
+                    'last_year': max(years) if years else None,
+                    'most_productive_decade': most_productive_decade
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis temporal: {e}")
+            return {'error': str(e)}
+
+    def _get_concerts_analysis_simple(self, artist_id):
+        """Análisis de conciertos simplificado"""
+        try:
+            # Conciertos por año
+            concerts_query = """
+                SELECT substr(eventDate, 1, 4) as year, COUNT(*) as concerts
+                FROM artists_setlistfm 
+                WHERE artist_id = ? AND eventDate IS NOT NULL
+                GROUP BY year
+                ORDER BY year
+            """
+            concerts_data = self.db_manager.execute_query(concerts_query, (artist_id,))
+            
+            # Canciones más tocadas
+            songs_query = """
+                SELECT sets
+                FROM artists_setlistfm 
+                WHERE artist_id = ? AND sets IS NOT NULL
+            """
+            setlist_data = self.db_manager.execute_query(songs_query, (artist_id,))
+            
+            if not concerts_data and not setlist_data:
+                return {'error': 'No se encontraron datos de conciertos para este artista'}
+            
+            # Procesar datos
+            from collections import Counter
+            import json
+            
+            concerts_by_year = []
+            total_concerts = 0
+            
+            for row in concerts_data:
+                try:
+                    year = int(row['year'])
+                    count = row['concerts']
+                    total_concerts += count
+                    concerts_by_year.append({'year': year, 'concerts': count})
+                except:
+                    continue
+            
+            # Procesar canciones
+            song_counts = Counter()
+            for row in setlist_data:
+                try:
+                    sets_data = json.loads(row['sets']) if row['sets'] else []
+                    for set_data in sets_data:
+                        if isinstance(set_data, dict) and 'song' in set_data:
+                            songs = set_data['song']
+                            if isinstance(songs, list):
+                                for song in songs:
+                                    if isinstance(song, dict) and 'name' in song:
+                                        song_counts[song['name']] += 1
+                except:
+                    continue
+            
+            top_songs = [{'song': song, 'plays': count} for song, count in song_counts.most_common(15)]
+            
+            # Países visitados
+            countries_query = """
+                SELECT DISTINCT country_name
+                FROM artists_setlistfm 
+                WHERE artist_id = ? AND country_name IS NOT NULL
+            """
+            countries_data = self.db_manager.execute_query(countries_query, (artist_id,))
+            
+            # Último concierto
+            last_concert_query = """
+                SELECT eventDate
+                FROM artists_setlistfm 
+                WHERE artist_id = ? AND eventDate IS NOT NULL
+                ORDER BY eventDate DESC
+                LIMIT 1
+            """
+            last_concert = self.db_manager.execute_query(last_concert_query, (artist_id,))
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'concerts_timeline': stats_manager.create_chart('line', concerts_by_year, 'Conciertos por Año', 'year', 'concerts'),
+                'most_played_songs': stats_manager.create_chart('bar', top_songs, 'Canciones Más Tocadas', 'song', 'plays')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_concerts': total_concerts,
+                    'countries_visited': len(countries_data),
+                    'last_concert_date': last_concert[0]['eventDate'] if last_concert else 'N/A'
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de conciertos: {e}")
+            return {'error': str(e)}
+
+    def _get_genres_analysis_simple(self, artist_id):
+        """Análisis de géneros simplificado"""
+        try:
+            # Géneros de álbumes
+            album_genres_query = """
+                SELECT genre, COUNT(*) as count
+                FROM albums 
+                WHERE artist_id = ? AND genre IS NOT NULL AND genre != ''
+                GROUP BY genre 
+                ORDER BY count DESC
+                LIMIT 10
+            """
+            album_genres = self.db_manager.execute_query(album_genres_query, (artist_id,))
+            
+            # Datos de Discogs
+            discogs_query = """
+                SELECT genres, styles
+                FROM discogs_discography 
+                WHERE artist_id = ?
+            """
+            discogs_data = self.db_manager.execute_query(discogs_query, (artist_id,))
+            
+            # Tags de Last.fm
+            lastfm_query = """
+                SELECT tags
+                FROM artists 
+                WHERE id = ? AND tags IS NOT NULL AND tags != ''
+            """
+            lastfm_data = self.db_manager.execute_query(lastfm_query, (artist_id,))
+            
+            from collections import Counter
+            import json
+            
+            # Procesar datos de Discogs
+            discogs_genres = Counter()
+            discogs_styles = Counter()
+            
+            for row in discogs_data:
+                try:
+                    if row['genres']:
+                        genres = json.loads(row['genres'])
+                        for genre in genres:
+                            discogs_genres[genre] += 1
+                except:
+                    pass
+                
+                try:
+                    if row['styles']:
+                        styles = json.loads(row['styles'])
+                        for style in styles:
+                            discogs_styles[style] += 1
+                except:
+                    pass
+            
+            # Procesar tags de Last.fm
+            lastfm_tags = Counter()
+            for row in lastfm_data:
+                try:
+                    if row['tags']:
+                        tags = [tag.strip() for tag in row['tags'].split(',')]
+                        for tag in tags[:10]:
+                            lastfm_tags[tag] += 1
+                except:
+                    pass
+            
+            # Preparar datos
+            album_genres_data = [{'genre': row['genre'], 'count': row['count']} for row in album_genres]
+            discogs_genres_data = [{'genre': g, 'count': c} for g, c in discogs_genres.most_common(10)]
+            discogs_styles_data = [{'style': s, 'count': c} for s, c in discogs_styles.most_common(10)]
+            lastfm_tags_data = [{'tag': t, 'count': c} for t, c in lastfm_tags.most_common(10)]
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'album_genres': stats_manager.create_chart('pie', album_genres_data, 'Géneros de Álbumes', 'genre', 'count'),
+                'discogs_genres': stats_manager.create_chart('pie', discogs_genres_data, 'Géneros Discogs', 'genre', 'count'),
+                'discogs_styles': stats_manager.create_chart('pie', discogs_styles_data, 'Estilos Discogs', 'style', 'count'),
+                'lastfm_tags': stats_manager.create_chart('pie', lastfm_tags_data, 'Tags Last.fm', 'tag', 'count')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_album_genres': len(album_genres_data),
+                    'total_discogs_genres': len(discogs_genres_data),
+                    'total_discogs_styles': len(discogs_styles_data),
+                    'total_lastfm_tags': len(lastfm_tags_data)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de géneros: {e}")
+            return {'error': str(e)}
+
+    def _get_labels_analysis_simple(self, artist_id):
+        """Análisis de sellos simplificado"""
+        try:
+            # Sellos por álbum
+            labels_query = """
+                SELECT label, year, COUNT(*) as count
+                FROM albums 
+                WHERE artist_id = ? AND label IS NOT NULL AND label != ''
+                GROUP BY label, year
+                ORDER BY year, count DESC
+            """
+            labels_data = self.db_manager.execute_query(labels_query, (artist_id,))
+            
+            if not labels_data:
+                return {'error': 'No se encontraron datos de sellos para este artista'}
+            
+            from collections import Counter, defaultdict
+            
+            labels_count = Counter()
+            labels_timeline = defaultdict(lambda: defaultdict(int))
+            
+            for row in labels_data:
+                label = row['label']
+                year = row['year']
+                count = row['count']
+                
+                labels_count[label] += count
+                
+                try:
+                    year_int = int(year) if year else 0
+                    labels_timeline[year_int][label] += count
+                except:
+                    pass
+            
+            # Datos para gráficos
+            labels_pie_data = [{'label': l, 'count': c} for l, c in labels_count.most_common(10)]
+            
+            # Timeline acumulativo
+            labels_cumulative = []
+            cumulative_totals = defaultdict(int)
+            
+            for year in sorted(labels_timeline.keys()):
+                for label, count in labels_timeline[year].items():
+                    cumulative_totals[label] += count
+                    if label in [item['label'] for item in labels_pie_data[:5]]:
+                        labels_cumulative.append({
+                            'year': year,
+                            'label': label,
+                            'cumulative': cumulative_totals[label]
+                        })
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'labels_pie': stats_manager.create_chart('pie', labels_pie_data, 'Distribución por Sellos', 'label', 'count'),
+                'labels_timeline': stats_manager.create_chart('line', labels_cumulative, 'Álbumes Acumulados por Sello', 'year', 'cumulative')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_labels': len(labels_count),
+                    'main_label': labels_count.most_common(1)[0][0] if labels_count else 'N/A',
+                    'main_label_albums': labels_count.most_common(1)[0][1] if labels_count else 0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de sellos: {e}")
+            return {'error': str(e)}
+
+    def _get_discography_analysis_simple(self, artist_id):
+        """Análisis de discografía simplificado"""
+        try:
+            # Datos de Discogs
+            discogs_query = """
+                SELECT format, type, user_coll, user_wantlist, formats
+                FROM discogs_discography 
+                WHERE artist_id = ?
+            """
+            discogs_data = self.db_manager.execute_query(discogs_query, (artist_id,))
+            
+            if not discogs_data:
+                return {'error': 'No se encontraron datos de discografía en Discogs para este artista'}
+            
+            from collections import Counter
+            import json
+            
+            formats_count = Counter()
+            types_count = Counter()
+            collection_data = {'En colección': 0, 'No en colección': 0}
+            
+            for row in discogs_data:
+                # Formatos
+                if row['format']:
+                    formats_count[row['format']] += 1
+                elif row['formats']:
+                    try:
+                        formats = json.loads(row['formats'])
+                        for fmt in formats:
+                            if isinstance(fmt, dict) and 'name' in fmt:
+                                formats_count[fmt['name']] += 1
+                    except:
+                        pass
+                
+                # Tipos
+                if row['type']:
+                    types_count[row['type']] += 1
+                
+                # Colección
+                if row['user_coll'] and int(row['user_coll']) > 0:
+                    collection_data['En colección'] += 1
+                else:
+                    collection_data['No en colección'] += 1
+            
+            # Preparar datos
+            formats_data = [{'format': f, 'count': c} for f, c in formats_count.most_common(10)]
+            types_data = [{'type': t, 'count': c} for t, c in types_count.most_common(10)]
+            collection_chart_data = [{'status': s, 'count': c} for s, c in collection_data.items()]
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'formats': stats_manager.create_chart('pie', formats_data, 'Distribución por Formato', 'format', 'count'),
+                'types': stats_manager.create_chart('pie', types_data, 'Tipos de Lanzamiento', 'type', 'count'),
+                'collection': stats_manager.create_chart('pie', collection_chart_data, 'En Colección', 'status', 'count')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_releases': len(discogs_data),
+                    'in_collection': collection_data['En colección'],
+                    'formats_count': len(formats_count)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de discografía: {e}")
+            return {'error': str(e)}
+
+    def _get_listens_analysis_simple(self, artist_id):
+        """Análisis de escuchas simplificado"""
+        try:
+            # Escuchas de Last.fm
+            lastfm_query = """
+                SELECT track_name, scrobble_date, COUNT(*) as plays
+                FROM scrobbles_paqueradejere 
+                WHERE artist_id = ?
+                GROUP BY track_name, DATE(scrobble_date)
+                ORDER BY scrobble_date
+            """
+            lastfm_data = self.db_manager.execute_query(lastfm_query, (artist_id,))
+            
+            # Escuchas de ListenBrainz
+            listenbrainz_query = """
+                SELECT track_name, listen_date, COUNT(*) as plays
+                FROM listens_guevifrito 
+                WHERE artist_id = ?
+                GROUP BY track_name, DATE(listen_date)
+                ORDER BY listen_date
+            """
+            listenbrainz_data = self.db_manager.execute_query(listenbrainz_query, (artist_id,))
+            
+            if not lastfm_data and not listenbrainz_data:
+                return {'error': 'No se encontraron datos de escuchas para este artista'}
+            
+            # Procesar datos - simplificado para evitar complejidad
+            from collections import defaultdict
+            
+            # Last.fm por canciones (top 10)
+            lastfm_tracks = defaultdict(int)
+            for row in lastfm_data:
+                lastfm_tracks[row['track_name']] += row['plays']
+            
+            lastfm_tracks_data = [{'track': t, 'plays': p} for t, p in sorted(lastfm_tracks.items(), key=lambda x: x[1], reverse=True)[:10]]
+            
+            # ListenBrainz por canciones (top 10)
+            listenbrainz_tracks = defaultdict(int)
+            for row in listenbrainz_data:
+                listenbrainz_tracks[row['track_name']] += row['plays']
+            
+            listenbrainz_tracks_data = [{'track': t, 'plays': p} for t, p in sorted(listenbrainz_tracks.items(), key=lambda x: x[1], reverse=True)[:10]]
+            
+            # Datos acumulativos por mes (simplificado)
+            lastfm_monthly = defaultdict(int)
+            for row in lastfm_data:
+                try:
+                    month = row['scrobble_date'][:7]  # YYYY-MM
+                    lastfm_monthly[month] += row['plays']
+                except:
+                    pass
+            
+            lastfm_cumulative_data = [{'month': m, 'plays': p} for m, p in sorted(lastfm_monthly.items())]
+            
+            listenbrainz_monthly = defaultdict(int)
+            for row in listenbrainz_data:
+                try:
+                    month = row['listen_date'][:7]  # YYYY-MM
+                    listenbrainz_monthly[month] += row['plays']
+                except:
+                    pass
+            
+            listenbrainz_cumulative_data = [{'month': m, 'plays': p} for m, p in sorted(listenbrainz_monthly.items())]
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'lastfm_tracks': stats_manager.create_chart('bar', lastfm_tracks_data, 'Top Canciones Last.fm', 'track', 'plays'),
+                'lastfm_cumulative': stats_manager.create_chart('line', lastfm_cumulative_data, 'Escuchas Last.fm por Mes', 'month', 'plays'),
+                'listenbrainz_tracks': stats_manager.create_chart('bar', listenbrainz_tracks_data, 'Top Canciones ListenBrainz', 'track', 'plays'),
+                'listenbrainz_cumulative': stats_manager.create_chart('line', listenbrainz_cumulative_data, 'Escuchas ListenBrainz por Mes', 'month', 'plays')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_lastfm_scrobbles': sum(lastfm_tracks.values()),
+                    'total_listenbrainz_listens': sum(listenbrainz_tracks.values()),
+                    'top_lastfm_track': max(lastfm_tracks.items(), key=lambda x: x[1])[0] if lastfm_tracks else 'N/A',
+                    'top_listenbrainz_track': max(listenbrainz_tracks.items(), key=lambda x: x[1])[0] if listenbrainz_tracks else 'N/A'
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de escuchas: {e}")
+            return {'error': str(e)}
+
+    def _get_collaborators_analysis_simple(self, artist_id):
+        """Análisis de colaboradores simplificado"""
+        try:
+            # Productores, ingenieros y colaboradores de los álbumes
+            collaborators_query = """
+                SELECT producers, engineers, credits
+                FROM albums 
+                WHERE artist_id = ? AND (producers IS NOT NULL OR engineers IS NOT NULL OR credits IS NOT NULL)
+            """
+            collaborators_data = self.db_manager.execute_query(collaborators_query, (artist_id,))
+            
+            if not collaborators_data:
+                return {'error': 'No se encontraron datos de colaboradores para este artista'}
+            
+            from collections import Counter
+            
+            producers = Counter()
+            engineers = Counter()
+            collaborators = Counter()
+            
+            for row in collaborators_data:
+                # Productores
+                if row['producers']:
+                    prods = [p.strip() for p in row['producers'].split(',')]
+                    for prod in prods[:5]:  # Limitar
+                        producers[prod] += 1
+                
+                # Ingenieros
+                if row['engineers']:
+                    engs = [e.strip() for e in row['engineers'].split(',')]
+                    for eng in engs[:5]:  # Limitar
+                        engineers[eng] += 1
+                
+                # Colaboradores (de credits)
+                if row['credits']:
+                    creds = [c.strip() for c in row['credits'].split(',')]
+                    for cred in creds[:5]:  # Limitar
+                        collaborators[cred] += 1
+            
+            # Preparar datos
+            producers_data = [{'producer': p, 'count': c} for p, c in producers.most_common(10)]
+            engineers_data = [{'engineer': e, 'count': c} for e, c in engineers.most_common(10)]
+            collaborators_data = [{'collaborator': c, 'count': count} for c, count in collaborators.most_common(10)]
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'producers': stats_manager.create_chart('pie', producers_data, 'Productores Frecuentes', 'producer', 'count'),
+                'engineers': stats_manager.create_chart('pie', engineers_data, 'Ingenieros Frecuentes', 'engineer', 'count'),
+                'collaborators': stats_manager.create_chart('pie', collaborators_data, 'Colaboradores Frecuentes', 'collaborator', 'count')
+            }
+            
+            return {
+                'charts': charts,
+                'stats': {
+                    'total_producers': len(producers),
+                    'total_engineers': len(engineers),
+                    'total_collaborators': len(collaborators)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de colaboradores: {e}")
+            return {'error': str(e)}
+
+    def _get_feeds_analysis_simple(self, artist_id):
+        """Análisis de feeds simplificado"""
+        try:
+            # Feeds del artista
+            feeds_query = """
+                SELECT f.feed_name, f.post_title, f.post_url, f.post_date
+                FROM feeds f
+                JOIN menciones m ON f.id = m.feed_id
+                WHERE m.artist_id = ?
+                ORDER BY f.post_date DESC
+                LIMIT 50
+            """
+            feeds_data = self.db_manager.execute_query(feeds_query, (artist_id,))
+            
+            if not feeds_data:
+                return {'error': 'No se encontraron feeds para este artista'}
+            
+            from collections import Counter, defaultdict
+            
+            # Feeds por fuente
+            sources = Counter()
+            monthly_activity = defaultdict(int)
+            
+            feeds_list = []
+            for row in feeds_data:
+                feeds_list.append({
+                    'feed_name': row['feed_name'],
+                    'post_title': row['post_title'],
+                    'post_url': row['post_url'],
+                    'post_date': row['post_date']
+                })
+                
+                sources[row['feed_name']] += 1
+                
+                # Actividad mensual
+                try:
+                    month = row['post_date'][:7] if row['post_date'] else 'Unknown'
+                    monthly_activity[month] += 1
+                except:
+                    pass
+            
+            # Preparar datos para gráficos
+            sources_data = [{'source': s, 'count': c} for s, c in sources.most_common(10)]
+            activity_data = [{'month': m, 'count': c} for m, c in sorted(monthly_activity.items())]
+            
+            from stats_manager import StatsManager
+            stats_manager = StatsManager(self.db_manager.db_path, self.config)
+            
+            charts = {
+                'feeds_sources': stats_manager.create_chart('pie', sources_data, 'Feeds por Publicación', 'source', 'count'),
+                'feeds_timeline': stats_manager.create_chart('line', activity_data, 'Actividad por Mes', 'month', 'count')
+            }
+            
+            return {
+                'charts': charts,
+                'feeds': feeds_list,
+                'stats': {
+                    'total_feeds': len(feeds_data),
+                    'total_sources': len(sources),
+                    'most_active_source': sources.most_common(1)[0][0] if sources else 'N/A'
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error en análisis de feeds: {e}")
+            return {'error': str(e)}

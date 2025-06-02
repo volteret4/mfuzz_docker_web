@@ -1993,6 +1993,33 @@
                 const secs = Math.floor(seconds % 60);
                 return `${mins}:${secs.toString().padStart(2, '0')}`;
             }
+
+            async showArtistDetailed(artistId) {
+                this.pushHistory({ type: 'artist', id: artistId });
+                this.showLoading('Cargando información del artista...');
+                
+                try {
+                    const [artistResponse, albumsResponse] = await Promise.all([
+                        fetch(`/api/artists/${artistId}`),
+                        fetch(`/api/artists/${artistId}/albums`)
+                    ]);
+                    
+                    const artistData = await artistResponse.json();
+                    const albumsData = await albumsResponse.json();
+                    
+                    if (artistData.error || albumsData.error) {
+                        this.showError('Error cargando información del artista');
+                        return;
+                    }
+                    
+                    this.renderArtistDetailedPage(artistData.artist, albumsData.albums);
+                    
+                } catch (error) {
+                    console.error('Error cargando artista:', error);
+                    this.showError('Error cargando información del artista');
+                }
+            }
+
         }
 
         // Inicializar la aplicación

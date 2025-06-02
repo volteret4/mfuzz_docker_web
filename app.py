@@ -8,6 +8,7 @@ from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.exceptions import NotFound
 import configparser
 
+
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
