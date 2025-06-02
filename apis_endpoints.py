@@ -215,84 +215,151 @@ class APIEndpoints:
         # === DESCARGAS ===
         @self.app.route('/api/download/album/<int:album_id>', methods=['POST'])
         def api_download_album(album_id):
-            """Descargar un álbum completo"""
+            """Iniciar descarga de álbum usando folder_path"""
             try:
+                logger.info(f"Solicitud de descarga para álbum ID: {album_id}")
+                
+                # Obtener información del álbum incluyendo folder_path
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
                 
-                # Obtener información del usuario (IP, user-agent, etc.)
+                logger.info(f"Álbum encontrado: {album['name']} - {album['artist_name']}")
+                logger.info(f"Folder path: {album.get('folder_path', 'No especificado')}")
+                
+                # Información del usuario
                 user_info = {
                     'ip': request.remote_addr,
                     'user_agent': request.headers.get('User-Agent', ''),
                     'timestamp': time.time()
                 }
                 
-                # Iniciar descarga en hilo separado
-                download_id = f"album_{album_id}_{int(time.time())}"
+                # Crear ID único para la descarga
+                download_id = f"album_{album_id}_{int(time.time())}_{hash(request.remote_addr) % 10000}"
+                
+                # Registrar descarga
                 self.active_downloads[download_id] = {
                     'status': 'starting',
                     'album_id': album_id,
                     'album_name': album.get('name', ''),
                     'artist_name': album.get('artist_name', ''),
+                    'folder_path': album.get('folder_path', ''),
                     'progress': 0,
-                    'started_at': time.time()
+                    'started_at': time.time(),
+                    'user_ip': user_info['ip']
                 }
                 
+                logger.info(f"Descarga registrada con ID: {download_id}")
+                logger.info(f"Descargas activas: {list(self.active_downloads.keys())}")
+                
+                # Iniciar descarga en hilo separado
                 thread = threading.Thread(
                     target=self._download_album_worker,
-                    args=(download_id, album, user_info)
+                    args=(download_id, album, user_info),
+                    daemon=True
                 )
-                thread.daemon = True
                 thread.start()
                 
                 return jsonify({
                     'download_id': download_id,
                     'status': 'started',
-                    'message': 'Descarga iniciada'
+                    'message': 'Descarga iniciada',
+                    'album_name': album.get('name'),
+                    'artist_name': album.get('artist_name')
                 })
                 
             except Exception as e:
                 logger.error(f"Error iniciando descarga del álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
         
-        @self.app.route('/api/download/status/<download_id>')
-        def api_download_status(download_id):
-            """Obtener estado de una descarga"""
-            if download_id not in self.active_downloads:
-                return jsonify({'error': 'Descarga no encontrada'}), 404
+        @self.app.route('/api/download/list')
+        def api_list_downloads():
+            """Listar todas las descargas activas (para debug)"""
+            downloads_info = {}
+            for download_id, info in self.active_downloads.items():
+                downloads_info[download_id] = {
+                    'status': info.get('status'),
+                    'album_name': info.get('album_name'),
+                    'artist_name': info.get('artist_name'),
+                    'progress': info.get('progress', 0),
+                    'started_at': info.get('started_at'),
+                    'time_running': time.time() - info.get('started_at', time.time()),
+                    'file_exists': os.path.exists(info.get('file_path', '')) if info.get('file_path') else False,
+                    'file_size': os.path.getsize(info.get('file_path', '')) if info.get('file_path') and os.path.exists(info.get('file_path', '')) else 0
+                }
             
-            return jsonify(self.active_downloads[download_id])
+            return jsonify({
+                'active_downloads': downloads_info,
+                'total': len(downloads_info),
+                'debug_info': {
+                    'downloads_dir': self.config.get('paths', {}).get('downloads', '/downloads'),
+                    'active_keys': list(self.active_downloads.keys())
+                }
+            })
+
+
+
         
         @self.app.route('/api/download/file/<download_id>')
         def api_download_file(download_id):
-            """Descargar archivo generado - VERSION CORREGIDA"""
+            """Descargar archivo ZIP generado - VERSION ÚNICA Y CORREGIDA"""
+            logger.info(f"Solicitud de descarga para ID: {download_id}")
+            logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
+            
+            # Verificar que la descarga existe
             if download_id not in self.active_downloads:
-                return jsonify({'error': 'Descarga no encontrada'}), 404
+                logger.error(f"Download ID {download_id} no encontrado en active_downloads")
+                available_downloads = list(self.active_downloads.keys())
+                
+                # Debug adicional
+                logger.error(f"Descargas disponibles: {available_downloads}")
+                for did, info in self.active_downloads.items():
+                    logger.error(f"  - {did}: status={info.get('status')}, album={info.get('album_name')}")
+                
+                return jsonify({
+                    'error': 'Descarga no encontrada',
+                    'download_id': download_id,
+                    'active_downloads': available_downloads,
+                    'total_active': len(available_downloads)
+                }), 404
             
             download_info = self.active_downloads[download_id]
+            logger.info(f"Estado de descarga {download_id}: {download_info.get('status')}")
+            
+            # Verificar que la descarga está completada
             if download_info['status'] != 'completed':
                 return jsonify({
-                    'error': f'Descarga no completada. Estado actual: {download_info["status"]}',
-                    'status': download_info['status']
+                    'error': f'Descarga no completada. Estado: {download_info["status"]}',
+                    'status': download_info['status'],
+                    'progress': download_info.get('progress', 0),
+                    'error_detail': download_info.get('error', ''),
+                    'album_name': download_info.get('album_name', ''),
+                    'artist_name': download_info.get('artist_name', '')
                 }), 400
             
+            # Obtener información del archivo
+            file_path = download_info.get('file_path')
+            zip_filename = download_info.get('zip_filename', 'album.zip')
+            
+            if not file_path:
+                logger.error(f"No hay file_path en download_info: {download_info}")
+                return jsonify({'error': 'Ruta del archivo no encontrada en la descarga'}), 404
+            
+            if not os.path.exists(file_path):
+                logger.error(f"Archivo no existe en la ruta: {file_path}")
+                return jsonify({'error': f'Archivo no existe: {file_path}'}), 404
+            
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                logger.error(f"Archivo está vacío: {file_path}")
+                return jsonify({'error': 'El archivo está vacío'}), 400
+            
+            logger.info(f"Enviando archivo: {file_path} ({file_size} bytes) como {zip_filename}")
+            
             try:
-                file_path = download_info.get('file_path')
-                zip_filename = download_info.get('zip_filename', 'album.zip')
-                
-                if not file_path:
-                    return jsonify({'error': 'Ruta del archivo no encontrada'}), 404
-                
-                if not os.path.exists(file_path):
-                    return jsonify({'error': f'Archivo no encontrado en: {file_path}'}), 404
-                
-                # Verificar que el archivo tiene contenido
-                file_size = os.path.getsize(file_path)
-                if file_size == 0:
-                    return jsonify({'error': 'El archivo está vacío'}), 400
-                
-                logger.info(f"Enviando archivo: {file_path} ({file_size} bytes)")
+                # Marcar descarga como entregada
+                download_info['downloaded_at'] = time.time()
+                download_info['download_count'] = download_info.get('download_count', 0) + 1
                 
                 return send_file(
                     file_path,
@@ -302,8 +369,9 @@ class APIEndpoints:
                 )
                 
             except Exception as e:
-                logger.error(f"Error enviando archivo de descarga {download_id}: {e}")
-                return jsonify({'error': f'Error interno: {str(e)}'}), 500
+                logger.error(f"Error enviando archivo: {e}")
+                return jsonify({'error': f'Error enviando archivo: {str(e)}'}), 500
+
         
         # === HISTORIAL Y ESTADÍSTICAS ===
         @self.app.route('/api/recent/searches')
@@ -369,302 +437,381 @@ class APIEndpoints:
         # === DIAGNÓSTICO ===
         @self.app.route('/api/debug/album/<int:album_id>')
         def api_debug_album(album_id):
-            """Diagnóstico detallado de un álbum - VERSION MEJORADA"""
+            """Diagnóstico detallado usando folder_path"""
             try:
-                # Información básica del álbum
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
                 
-                # Obtener canciones con información de rutas
-                tracks = self.db_manager.get_album_tracks_with_paths(album_id)
-                
-                # Verificar sistema de archivos
                 music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
                 downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
+                folder_path = album.get('folder_path', '')
                 
                 debug_info = {
                     'album': album,
-                    'tracks_count': len(tracks),
                     'music_root': music_root,
                     'music_root_exists': os.path.exists(music_root),
                     'downloads_dir': downloads_dir,
                     'downloads_dir_exists': os.path.exists(downloads_dir),
                     'downloads_dir_writable': os.access(downloads_dir, os.W_OK) if os.path.exists(downloads_dir) else False,
-                    'tracks_analysis': []
+                    'folder_path_analysis': {}
                 }
                 
-                # Contar tipos de errores
-                path_stats = {
-                    'with_paths': 0,
-                    'without_paths': 0,
-                    'files_exist': 0,
-                    'files_missing': 0,
-                    'path_types': {}
-                }
-                
-                for i, track in enumerate(tracks):
-                    track_info = {
-                        'id': track.get('id'),
-                        'title': track.get('title'),
-                        'artist': track.get('artist'),
-                        'track_number': track.get('track_number'),
-                        'available_paths': track.get('available_paths', {}),
-                        'best_path': track.get('best_path'),
-                        'file_exists': False,
-                        'full_path': None,
-                        'search_attempts': []
+                # Analizar folder_path
+                if folder_path:
+                    # Determinar directorio del álbum
+                    if folder_path.startswith('/'):
+                        album_directory = folder_path
+                    else:
+                        album_directory = os.path.join(music_root, folder_path.lstrip('/'))
+                    
+                    debug_info['folder_path_analysis'] = {
+                        'raw_folder_path': folder_path,
+                        'computed_directory': album_directory,
+                        'directory_exists': os.path.exists(album_directory),
+                        'is_directory': os.path.isdir(album_directory) if os.path.exists(album_directory) else False,
+                        'music_files': []
                     }
                     
-                    # Estadísticas de rutas
-                    if track.get('available_paths'):
-                        path_stats['with_paths'] += 1
-                        for path_type in track['available_paths'].keys():
-                            path_stats['path_types'][path_type] = path_stats['path_types'].get(path_type, 0) + 1
-                    else:
-                        path_stats['without_paths'] += 1
-                    
-                    # Verificar archivos
-                    if track.get('best_path'):
-                        # Intentar diferentes formas de construir la ruta
-                        search_paths = []
+                    # Buscar archivos de música
+                    if os.path.exists(album_directory) and os.path.isdir(album_directory):
+                        music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
+                        music_files = []
                         
-                        best_path = track['best_path']
-                        
-                        # Ruta absoluta
-                        if best_path.startswith('/'):
-                            search_paths.append(best_path)
-                        
-                        # Ruta relativa desde music_root
-                        search_paths.append(os.path.join(music_root, best_path.lstrip('/')))
-                        
-                        # Quitar file:// si existe
-                        if best_path.startswith('file://'):
-                            clean_path = best_path[7:]
-                            search_paths.append(clean_path)
-                            if not clean_path.startswith('/'):
-                                search_paths.append(os.path.join(music_root, clean_path))
-                        
-                        # Verificar cada ruta
-                        for search_path in search_paths:
-                            exists = os.path.exists(search_path)
-                            track_info['search_attempts'].append({
-                                'path': search_path,
-                                'exists': exists
-                            })
+                        try:
+                            for root, dirs, files in os.walk(album_directory):
+                                for file in files:
+                                    _, ext = os.path.splitext(file.lower())
+                                    if ext in music_extensions:
+                                        full_path = os.path.join(root, file)
+                                        file_info = {
+                                            'name': file,
+                                            'path': full_path,
+                                            'size': os.path.getsize(full_path),
+                                            'relative_path': os.path.relpath(full_path, album_directory)
+                                        }
+                                        music_files.append(file_info)
                             
-                            if exists:
-                                track_info['file_exists'] = True
-                                track_info['full_path'] = search_path
-                                path_stats['files_exist'] += 1
-                                break
-                        
-                        if not track_info['file_exists']:
-                            path_stats['files_missing'] += 1
+                            debug_info['folder_path_analysis']['music_files'] = music_files[:10]  # Primeros 10
+                            debug_info['folder_path_analysis']['total_music_files'] = len(music_files)
+                            debug_info['folder_path_analysis']['total_size'] = sum(f['size'] for f in music_files)
+                            
+                        except Exception as e:
+                            debug_info['folder_path_analysis']['scan_error'] = str(e)
                     
-                    # Solo incluir las primeras 10 canciones en el análisis detallado
-                    if i < 10:
-                        debug_info['tracks_analysis'].append(track_info)
-                
-                debug_info['path_statistics'] = path_stats
-                
-                # Verificar algunos directorios comunes
-                common_dirs = [
-                    music_root,
-                    os.path.join(music_root, album.get('artist_name', '')),
-                    os.path.join(music_root, album.get('artist_name', ''), album.get('name', ''))
-                ]
-                
-                debug_info['directory_check'] = []
-                for dir_path in common_dirs:
-                    if dir_path.strip():
-                        debug_info['directory_check'].append({
-                            'path': dir_path,
-                            'exists': os.path.exists(dir_path),
-                            'is_dir': os.path.isdir(dir_path) if os.path.exists(dir_path) else False,
-                            'files_count': len(os.listdir(dir_path)) if os.path.exists(dir_path) and os.path.isdir(dir_path) else 0
-                        })
+                else:
+                    # No hay folder_path, intentar construcción manual
+                    artist_name = album.get('artist_name', '')
+                    album_name = album.get('name', '')
+                    
+                    if artist_name and album_name:
+                        possible_paths = [
+                            os.path.join(music_root, artist_name, album_name),
+                            os.path.join(music_root, artist_name.replace(' ', '_'), album_name),
+                            os.path.join(music_root, artist_name, album_name.replace(' ', '_')),
+                        ]
+                        
+                        debug_info['folder_path_analysis'] = {
+                            'raw_folder_path': None,
+                            'fallback_paths': []
+                        }
+                        
+                        for path in possible_paths:
+                            path_info = {
+                                'path': path,
+                                'exists': os.path.exists(path),
+                                'is_directory': os.path.isdir(path) if os.path.exists(path) else False
+                            }
+                            
+                            if path_info['is_directory']:
+                                # Contar archivos de música
+                                music_count = 0
+                                try:
+                                    music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
+                                    for root, dirs, files in os.walk(path):
+                                        for file in files:
+                                            _, ext = os.path.splitext(file.lower())
+                                            if ext in music_extensions:
+                                                music_count += 1
+                                    path_info['music_files_count'] = music_count
+                                except:
+                                    path_info['music_files_count'] = 0
+                            
+                            debug_info['folder_path_analysis']['fallback_paths'].append(path_info)
                 
                 return jsonify(debug_info)
                 
             except Exception as e:
                 logger.error(f"Error en diagnóstico del álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
+
+
+        @self.app.route('/api/debug/downloads')
+        def api_debug_downloads():
+            """Debug de descargas activas - TEMPORAL"""
+            downloads_debug = {}
+            downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
+            
+            # Información de directorio de descargas
+            dir_info = {
+                'path': downloads_dir,
+                'exists': os.path.exists(downloads_dir),
+                'writable': os.access(downloads_dir, os.W_OK) if os.path.exists(downloads_dir) else False,
+                'files': []
+            }
+            
+            if os.path.exists(downloads_dir):
+                try:
+                    files = os.listdir(downloads_dir)
+                    for f in files:
+                        file_path = os.path.join(downloads_dir, f)
+                        if os.path.isfile(file_path):
+                            dir_info['files'].append({
+                                'name': f,
+                                'size': os.path.getsize(file_path),
+                                'modified': os.path.getmtime(file_path)
+                            })
+                except Exception as e:
+                    dir_info['error'] = str(e)
+            
+            # Información de descargas activas
+            for download_id, info in self.active_downloads.items():
+                downloads_debug[download_id] = {
+                    'status': info.get('status'),
+                    'album_id': info.get('album_id'),
+                    'album_name': info.get('album_name'),
+                    'artist_name': info.get('artist_name'),
+                    'progress': info.get('progress', 0),
+                    'started_at': info.get('started_at'),
+                    'file_path': info.get('file_path'),
+                    'zip_filename': info.get('zip_filename'),
+                    'file_exists': os.path.exists(info.get('file_path', '')) if info.get('file_path') else False,
+                    'file_size': os.path.getsize(info.get('file_path', '')) if info.get('file_path') and os.path.exists(info.get('file_path', '')) else 0,
+                    'error': info.get('error', ''),
+                    'time_running': time.time() - info.get('started_at', time.time())
+                }
+            
+            return jsonify({
+                'downloads_directory': dir_info,
+                'active_downloads': downloads_debug,
+                'total_active': len(downloads_debug),
+                'memory_usage': {
+                    'active_downloads_keys': list(self.active_downloads.keys()),
+                    'cleanup_interval': self.download_cleanup_interval
+                }
+            })
     
     def _download_album_worker(self, download_id, album, user_info):
-        """Worker para descargar álbum en hilo separado - VERSION FINAL CORREGIDA"""
+        """Worker para descargar álbum usando folder_path - VERSION CORREGIDA"""
         try:
             download_info = self.active_downloads[download_id]
             download_info['status'] = 'processing'
+            download_info['progress'] = 5
             
             album_name = album.get('name', '')
             artist_name = album.get('artist_name', '')
             album_id = album.get('id')
+            folder_path = album.get('folder_path', '')
             
             logger.info(f"Iniciando descarga: {artist_name} - {album_name} (ID: {album_id})")
+            logger.info(f"Folder path del álbum: {folder_path}")
             
-            # Notificar inicio de descarga
+            # Notificar inicio
             try:
                 self.telegram_notifier.notify_download_started(
-                    album_name, artist_name, 
-                    user_info.get('ip', ''), 
-                    'local'
+                    album_name, artist_name, user_info.get('ip', ''), 'local'
                 )
             except Exception as e:
                 logger.warning(f"Error notificando inicio: {e}")
             
-            # Obtener canciones del álbum con información de rutas
-            tracks = self.db_manager.get_album_tracks_with_paths(album_id)
-            if not tracks:
-                raise Exception("No se encontraron canciones en el álbum")
+            # Determinar directorio del álbum
+            music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
+            album_directory = None
             
-            download_info['total_tracks'] = len(tracks)
-            download_info['processed_tracks'] = 0
-            logger.info(f"Encontradas {len(tracks)} canciones para descargar")
+            if folder_path:
+                # Opción 1: Usar folder_path de la tabla albums
+                if folder_path.startswith('/'):
+                    album_directory = folder_path
+                else:
+                    album_directory = os.path.join(music_root, folder_path.lstrip('/'))
+            else:
+                # Opción 2: Construir ruta basada en artista/álbum
+                safe_artist = artist_name.replace('/', '_').replace('\\', '_')
+                safe_album = album_name.replace('/', '_').replace('\\', '_')
+                album_directory = os.path.join(music_root, safe_artist, safe_album)
             
-            # Crear directorio de descargas si no existe
+            logger.info(f"Directorio del álbum: {album_directory}")
+            download_info['progress'] = 10
+            
+            # Verificar que el directorio existe
+            if not album_directory or not os.path.exists(album_directory):
+                raise Exception(f"Directorio del álbum no encontrado: {album_directory}")
+            
+            if not os.path.isdir(album_directory):
+                raise Exception(f"La ruta no es un directorio: {album_directory}")
+            
+            download_info['progress'] = 15
+            
+            # Buscar archivos de música en el directorio
+            music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
+            music_files = []
+            
+            for root, dirs, files in os.walk(album_directory):
+                for file in files:
+                    _, ext = os.path.splitext(file.lower())
+                    if ext in music_extensions:
+                        full_path = os.path.join(root, file)
+                        music_files.append({
+                            'path': full_path,
+                            'name': file,
+                            'relative_path': os.path.relpath(full_path, album_directory)
+                        })
+            
+            if not music_files:
+                raise Exception(f"No se encontraron archivos de música en: {album_directory}")
+            
+            # Ordenar archivos por nombre para mantener orden de pistas
+            music_files.sort(key=lambda x: x['name'])
+            
+            download_info['total_tracks'] = len(music_files)
+            download_info['progress'] = 20
+            logger.info(f"Encontrados {len(music_files)} archivos de música")
+            
+            # Crear directorio de descargas
             downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
             os.makedirs(downloads_dir, exist_ok=True)
             
-            # Verificar permisos de escritura
             if not os.access(downloads_dir, os.W_OK):
-                raise Exception(f"Sin permisos de escritura en directorio de descargas: {downloads_dir}")
+                raise Exception(f"Sin permisos de escritura en: {downloads_dir}")
             
-            # Crear nombre seguro para el archivo ZIP
+            # Crear archivo ZIP
             safe_artist = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_album = "".join(c for c in album_name if c.isalnum() or c in (' ', '-', '_')).strip()
             timestamp = int(time.time())
             zip_filename = f"{safe_artist} - {safe_album} [{timestamp}].zip"
             zip_path = os.path.join(downloads_dir, zip_filename)
             
-            music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
+            logger.info(f"Creando ZIP: {zip_path}")
+            download_info['progress'] = 25
+            
             successful_files = 0
             failed_files = []
             
-            logger.info(f"Directorio raíz de música: {music_root}")
-            logger.info(f"Creando ZIP en: {zip_path}")
-            
-            # Verificar que el directorio de música existe
-            if not os.path.exists(music_root):
-                raise Exception(f"Directorio de música no encontrado: {music_root}")
-            
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zipf:
-                for i, track in enumerate(tracks):
+                for i, music_file in enumerate(music_files):
                     try:
-                        # Actualizar progreso ANTES de procesar
-                        download_info['processed_tracks'] = i
-                        progress = int((i / len(tracks)) * 90)  # Máximo 90% durante procesamiento
+                        # Actualizar progreso (25% a 90%)
+                        progress = 25 + int((i / len(music_files)) * 65)
                         download_info['progress'] = progress
+                        download_info['processed_tracks'] = i + 1
+                        download_info['current_track'] = music_file['name']
                         
-                        track_title = track.get('title', f'Track {i+1}')
-                        track_number = track.get('track_number', i+1)
-                        download_info['current_track'] = track_title
+                        file_path = music_file['path']
                         
-                        logger.debug(f"Procesando canción {i+1}/{len(tracks)}: {track_title}")
-                        
-                        # Buscar archivo de música
-                        file_path = self._find_track_file_improved(track, music_root)
-                        
-                        if file_path and os.path.exists(file_path):
-                            # Crear nombre limpio para el archivo en el ZIP
-                            safe_title = "".join(c for c in track_title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
-                            _, ext = os.path.splitext(file_path)
-                            
-                            # Nombre del archivo en el ZIP
-                            if track_number and str(track_number).isdigit():
-                                zip_filename_track = f"{int(track_number):02d} - {safe_title}{ext}"
-                            else:
-                                zip_filename_track = f"{safe_title}{ext}"
-                            
-                            # Verificar que el archivo no está vacío
-                            file_size = os.path.getsize(file_path)
-                            if file_size > 0:
-                                # Añadir archivo al ZIP
-                                zipf.write(file_path, zip_filename_track)
-                                successful_files += 1
-                                logger.debug(f"Añadido al ZIP: {zip_filename_track} ({file_size} bytes)")
-                            else:
-                                failed_files.append(f"{track_title} - Archivo vacío")
-                            
+                        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                            # Usar ruta relativa en el ZIP para mantener estructura
+                            zip_name = music_file['relative_path']
+                            zipf.write(file_path, zip_name)
+                            successful_files += 1
+                            logger.debug(f"Añadido: {zip_name}")
                         else:
-                            error_msg = f"Archivo no encontrado para: {track_title}"
-                            if file_path:
-                                error_msg += f" (ruta: {file_path})"
-                            logger.warning(error_msg)
-                            failed_files.append(error_msg)
-                        
+                            failed_files.append(f"Archivo vacío o no existe: {music_file['name']}")
+                            
                     except Exception as e:
-                        error_msg = f"Error procesando {track_title}: {str(e)}"
+                        error_msg = f"Error con {music_file['name']}: {str(e)}"
                         logger.warning(error_msg)
                         failed_files.append(error_msg)
                         continue
-                
-                # Actualizar progreso final del procesamiento
-                download_info['processed_tracks'] = len(tracks)
-                download_info['progress'] = 95
+            
+            download_info['progress'] = 95
             
             if successful_files == 0:
-                # Limpiar archivo ZIP vacío
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
-                error_msg = f"No se encontraron archivos de música. Errores: {failed_files[:3]}"
-                raise Exception(error_msg)
+                raise Exception(f"No se pudieron procesar archivos de música. Errores: {failed_files[:3]}")
             
-            # Verificar que el ZIP se creó correctamente y tiene contenido
-            if not os.path.exists(zip_path):
-                raise Exception("Error: El archivo ZIP no se creó")
-                
+            # Verificar ZIP creado
+            if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                raise Exception("Error creando archivo ZIP")
+            
             zip_size = os.path.getsize(zip_path)
-            if zip_size == 0:
-                os.remove(zip_path)
-                raise Exception("Error: El archivo ZIP está vacío")
-            
-            logger.info(f"ZIP creado exitosamente: {zip_path} ({zip_size} bytes, {successful_files} archivos)")
+            logger.info(f"ZIP completado: {zip_path} ({zip_size} bytes, {successful_files} archivos)")
             
             # Actualizar estado final
-            download_info['status'] = 'completed'
-            download_info['progress'] = 100
-            download_info['file_path'] = zip_path
-            download_info['zip_filename'] = zip_filename
-            download_info['successful_files'] = successful_files
-            download_info['failed_files'] = len(failed_files)
-            download_info['failed_list'] = failed_files[:10]
-            download_info['completed_at'] = time.time()
-            download_info['file_size'] = zip_size
+            download_info.update({
+                'status': 'completed',
+                'progress': 100,
+                'file_path': zip_path,
+                'zip_filename': zip_filename,
+                'successful_files': successful_files,
+                'failed_files': len(failed_files),
+                'failed_list': failed_files[:10],
+                'completed_at': time.time(),
+                'file_size': zip_size
+            })
             
             # Notificar finalización
             try:
                 self.telegram_notifier.notify_download_completed(
-                    album_name, artist_name, 
-                    successful_files, zip_path, 
-                    'local'
+                    album_name, artist_name, successful_files, zip_path, 'local'
                 )
             except Exception as e:
                 logger.warning(f"Error notificando finalización: {e}")
-            
+                
         except Exception as e:
             logger.error(f"Error en descarga {download_id}: {e}")
-            download_info['status'] = 'error'
-            download_info['error'] = str(e)
-            download_info['progress'] = 0
             
-            # Limpiar archivo parcial si existe
+            # Actualizar estado de error
+            if download_id in self.active_downloads:
+                self.active_downloads[download_id].update({
+                    'status': 'error',
+                    'error': str(e),
+                    'progress': 0
+                })
+            
+            # Limpiar archivo parcial
             try:
                 if 'zip_path' in locals() and os.path.exists(zip_path):
                     os.remove(zip_path)
-                    logger.info(f"Archivo ZIP parcial eliminado: {zip_path}")
+                    logger.info(f"ZIP parcial eliminado: {zip_path}")
             except:
                 pass
             
             # Notificar error
             try:
                 self.telegram_notifier.notify_download_error(
-                    album.get('name', ''), 
-                    album.get('artist_name', ''), 
-                    str(e)
+                    album.get('name', ''), album.get('artist_name', ''), str(e)
                 )
             except Exception as notify_error:
                 logger.warning(f"Error notificando error: {notify_error}")
+
+        # === ENDPOINT DE DESCARGA CORREGIDO ===
+
+
+        @self.app.route('/api/download/status/<download_id>')
+        def api_download_status(download_id):
+            """Obtener estado de descarga con información detallada"""
+            logger.debug(f"Consulta estado para: {download_id}")
+            logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
+            
+            if download_id not in self.active_downloads:
+                return jsonify({
+                    'error': 'Descarga no encontrada',
+                    'download_id': download_id,
+                    'active_downloads': list(self.active_downloads.keys())
+                }), 404
+            
+            status = self.active_downloads[download_id].copy()
+            
+            # Añadir información adicional para debug
+            status['debug_info'] = {
+                'download_id': download_id,
+                'time_running': time.time() - status.get('started_at', time.time())
+            }
+            
+            return jsonify(status)
 
 
     def _find_track_file_improved(self, track, music_root):
