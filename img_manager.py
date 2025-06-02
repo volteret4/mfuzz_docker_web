@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ImageManager:
-    """Gestor de imágenes para artistas y álbumes"""
+    """Gestor de imágenes para artistas y álbumes - VERSIÓN MEJORADA CON SOPORTE JSON"""
     
     def __init__(self, config):
         self.config = config
@@ -26,10 +26,53 @@ class ImageManager:
         self.max_size = config.get('images', {}).get('max_size', 1024)
         self.supported_formats = config.get('images', {}).get('supported_formats', ['jpg', 'jpeg', 'png', 'webp'])
         
+        # NUEVO: Configuración para usar archivos JSON locales
+        self.use_json_metadata = config.get('images', {}).get('use_json_metadata', False)
+        self.json_artists_file = os.path.join(self.images_dir, 'artists', 'artists.json')
+        self.json_albums_file = os.path.join(self.images_dir, 'albums', 'albums.json')
+        
+        # Cache para evitar leer JSON repetidamente
+        self._artists_json_cache = None
+        self._albums_json_cache = None
+        self._json_cache_loaded = False
+        
         # Crear directorios necesarios
         self.setup_directories()
         
-        logger.info(f"ImageManager inicializado - Cache: {self.cache_enabled}, Dir: {self.images_dir}")
+        # Cargar metadatos JSON si está habilitado
+        if self.use_json_metadata:
+            self._load_json_metadata()
+        
+        logger.info(f"ImageManager inicializado - Cache: {self.cache_enabled}, JSON metadata: {self.use_json_metadata}, Dir: {self.images_dir}")
+    
+    def _load_json_metadata(self):
+        """Carga los metadatos JSON de artistas y álbumes"""
+        try:
+            # Cargar artistas
+            if os.path.exists(self.json_artists_file):
+                with open(self.json_artists_file, 'r', encoding='utf-8') as f:
+                    self._artists_json_cache = json.load(f)
+                logger.info(f"Cargado JSON de artistas: {len(self._artists_json_cache)} entradas")
+            else:
+                logger.warning(f"Archivo JSON de artistas no encontrado: {self.json_artists_file}")
+                self._artists_json_cache = {}
+            
+            # Cargar álbumes
+            if os.path.exists(self.json_albums_file):
+                with open(self.json_albums_file, 'r', encoding='utf-8') as f:
+                    self._albums_json_cache = json.load(f)
+                logger.info(f"Cargado JSON de álbumes: {len(self._albums_json_cache)} entradas")
+            else:
+                logger.warning(f"Archivo JSON de álbumes no encontrado: {self.json_albums_file}")
+                self._albums_json_cache = {}
+            
+            self._json_cache_loaded = True
+            
+        except Exception as e:
+            logger.error(f"Error cargando metadatos JSON: {e}")
+            self._artists_json_cache = {}
+            self._albums_json_cache = {}
+            self._json_cache_loaded = False
     
     def setup_directories(self):
         """Crea la estructura de directorios para imágenes"""
@@ -108,14 +151,20 @@ class ImageManager:
             raise
     
     def get_artist_image(self, artist_id: int) -> Optional[str]:
-        """Obtiene la imagen de un artista"""
+        """Obtiene la imagen de un artista - VERSIÓN MEJORADA"""
         try:
-            # Verificar cache local primero
+            # NUEVO: Intentar desde JSON local primero si está habilitado
+            if self.use_json_metadata and self._json_cache_loaded:
+                json_image = self._get_artist_image_from_json(artist_id)
+                if json_image:
+                    return json_image
+            
+            # Verificar cache local
             cache_path = os.path.join(self.images_dir, 'artists', f'{artist_id}.jpg')
             if os.path.exists(cache_path):
                 return cache_path
             
-            # Buscar información de imagen en la base de datos
+            # Buscar información de imagen en la base de datos (método original)
             with self.get_db_connection() as conn:
                 cursor = conn.execute("""
                     SELECT img, img_urls, img_paths 
@@ -134,6 +183,117 @@ class ImageManager:
         except Exception as e:
             logger.error(f"Error obteniendo imagen del artista {artist_id}: {e}")
             return self.get_default_artist_image()
+    
+    def get_album_image(self, album_id: int) -> Optional[str]:
+        """Obtiene la carátula de un álbum - VERSIÓN MEJORADA"""
+        try:
+            # NUEVO: Intentar desde JSON local primero si está habilitado
+            if self.use_json_metadata and self._json_cache_loaded:
+                json_image = self._get_album_image_from_json(album_id)
+                if json_image:
+                    return json_image
+            
+            # Verificar cache local
+            cache_path = os.path.join(self.images_dir, 'albums', f'{album_id}.jpg')
+            if os.path.exists(cache_path):
+                return cache_path
+            
+            # Buscar información de imagen en la base de datos (método original)
+            with self.get_db_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT album_art_path, album_art_urls 
+                    FROM albums 
+                    WHERE id = ?
+                """, (album_id,))
+                result = cursor.fetchone()
+                
+                if not result:
+                    return self.get_default_album_image()
+                
+                # Intentar obtener imagen de diferentes fuentes
+                image_path = self._process_album_image_data(album_id, result)
+                return image_path or self.get_default_album_image()
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo imagen del álbum {album_id}: {e}")
+            return self.get_default_album_image()
+    
+    def _get_artist_image_from_json(self, artist_id: int) -> Optional[str]:
+        """Obtiene imagen de artista desde JSON local"""
+        try:
+            artist_id_str = str(artist_id)
+            
+            if artist_id_str in self._artists_json_cache:
+                metadata = self._artists_json_cache[artist_id_str]
+                filename = metadata.get('filename')
+                
+                if filename:
+                    image_path = os.path.join(self.images_dir, 'artists', filename)
+                    
+                    if os.path.exists(image_path):
+                        logger.debug(f"Imagen de artista encontrada en JSON: {image_path}")
+                        return image_path
+                    else:
+                        logger.warning(f"Archivo de imagen de artista no existe: {image_path}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo imagen de artista desde JSON {artist_id}: {e}")
+            return None
+    
+    def _get_album_image_from_json(self, album_id: int) -> Optional[str]:
+        """Obtiene imagen de álbum desde JSON local"""
+        try:
+            album_id_str = str(album_id)
+            
+            if album_id_str in self._albums_json_cache:
+                metadata = self._albums_json_cache[album_id_str]
+                filename = metadata.get('filename')
+                
+                if filename:
+                    image_path = os.path.join(self.images_dir, 'albums', filename)
+                    
+                    if os.path.exists(image_path):
+                        logger.debug(f"Imagen de álbum encontrada en JSON: {image_path}")
+                        return image_path
+                    else:
+                        logger.warning(f"Archivo de imagen de álbum no existe: {image_path}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo imagen de álbum desde JSON {album_id}: {e}")
+            return None
+    
+    def reload_json_metadata(self):
+        """Recarga los metadatos JSON (útil para recargar sin reiniciar)"""
+        if self.use_json_metadata:
+            logger.info("Recargando metadatos JSON...")
+            self._load_json_metadata()
+            return True
+        return False
+    
+    def get_json_stats(self) -> Dict:
+        """Obtiene estadísticas de los metadatos JSON"""
+        if not self.use_json_metadata or not self._json_cache_loaded:
+            return {
+                'enabled': self.use_json_metadata,
+                'loaded': self._json_cache_loaded,
+                'artists': 0,
+                'albums': 0
+            }
+        
+        return {
+            'enabled': self.use_json_metadata,
+            'loaded': self._json_cache_loaded,
+            'artists': len(self._artists_json_cache),
+            'albums': len(self._albums_json_cache),
+            'artists_file': self.json_artists_file,
+            'albums_file': self.json_albums_file,
+            'artists_file_exists': os.path.exists(self.json_artists_file),
+            'albums_file_exists': os.path.exists(self.json_albums_file)
+        }
     
     def get_album_image(self, album_id: int) -> Optional[str]:
         """Obtiene la carátula de un álbum"""
@@ -360,7 +520,7 @@ class ImageManager:
             return False
     
     def get_cache_stats(self) -> Dict:
-        """Obtiene estadísticas del cache de imágenes"""
+        """Obtiene estadísticas del cache de imágenes - VERSIÓN MEJORADA"""
         try:
             stats = {
                 'artists': 0,
@@ -371,15 +531,21 @@ class ImageManager:
             for category in ['artists', 'albums']:
                 cache_dir = os.path.join(self.images_dir, category)
                 if os.path.exists(cache_dir):
-                    files = [f for f in os.listdir(cache_dir) if f.endswith('.jpg')]
+                    files = [f for f in os.listdir(cache_dir) if f.endswith(('.jpg', '.png', '.webp')) and not f.endswith('.json')]
                     stats[category] = len(files)
                     
                     for file in files:
                         file_path = os.path.join(cache_dir, file)
-                        stats['total_size'] += os.path.getsize(file_path)
+                        try:
+                            stats['total_size'] += os.path.getsize(file_path)
+                        except:
+                            pass
             
             # Convertir a MB
             stats['total_size_mb'] = round(stats['total_size'] / (1024 * 1024), 2)
+            
+            # Añadir estadísticas JSON
+            stats['json_metadata'] = self.get_json_stats()
             
             return stats
             

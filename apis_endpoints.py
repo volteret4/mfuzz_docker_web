@@ -1314,6 +1314,89 @@ class APIEndpoints:
                 return jsonify({'error': str(e)}), 500
 
 
+        
+
+
+        @self.app.route('/api/images/reload-json', methods=['POST'])
+        def api_reload_json_metadata():
+            """Recarga los metadatos JSON de imágenes"""
+            try:
+                if not self.img_manager:
+                    return jsonify({'error': 'ImageManager no disponible'}), 500
+                
+                success = self.img_manager.reload_json_metadata()
+                
+                if success:
+                    stats = self.img_manager.get_json_stats()
+                    return jsonify({
+                        'success': True,
+                        'message': 'Metadatos JSON recargados correctamente',
+                        'stats': stats
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Metadatos JSON no están habilitados en la configuración'
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error recargando metadatos JSON: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/images/json-stats')
+        def api_get_json_stats():
+            """Obtiene estadísticas de los metadatos JSON"""
+            try:
+                if not self.img_manager:
+                    return jsonify({'error': 'ImageManager no disponible'}), 500
+                
+                stats = self.img_manager.get_json_stats()
+                return jsonify(stats)
+                
+            except Exception as e:
+                logger.error(f"Error obteniendo estadísticas JSON: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/images/cache-stats')
+        def api_get_cache_stats():
+            """Obtiene estadísticas del cache de imágenes - VERSIÓN MEJORADA"""
+            try:
+                if not self.img_manager:
+                    return jsonify({'error': 'ImageManager no disponible'}), 500
+                
+                stats = self.img_manager.get_cache_stats()
+                return jsonify(stats)
+                
+            except Exception as e:
+                logger.error(f"Error obteniendo estadísticas del cache: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/images/clear-cache', methods=['POST'])
+        def api_clear_image_cache():
+            """Limpia el cache de imágenes"""
+            try:
+                if not self.img_manager:
+                    return jsonify({'error': 'ImageManager no disponible'}), 500
+                
+                category = request.json.get('category') if request.is_json else None
+                success = self.img_manager.clear_cache(category)
+                
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'message': f'Cache de imágenes limpiado{"" if not category else f" (categoría: {category})"}',
+                        'stats': self.img_manager.get_cache_stats()
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'No se pudo limpiar el cache'
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error limpiando cache de imágenes: {e}")
+                return jsonify({'error': str(e)}), 500
+
 # Otras funciones
 
     def _download_album_worker(self, download_id, album, user_info):
