@@ -1,87 +1,61 @@
-# Music Web Explorer - Dockerfile simplificado sin nginx
 FROM python:3.11-slim
 
-# Instalar dependencias del sistema mínimas
+# Variables de entorno
+ENV PYTHONUNBUFFERED=1
+ENV USER=1000
+ENV USER_UID=1000
+ENV USER_GID=1001
+
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
+    curl \
     sqlite3 \
+    nginx \
+    supervisor \
     rsync \
     openssh-client \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear directorios de la aplicación
-RUN mkdir -p /app/data /app/music /downloads /app/logs /app/static /app/templates /app/images
+# Crear usuario con UID específico y grupo music para evitar problemas de permisos NFS
+RUN groupadd -g 1001 music 2>/dev/null || true && \
+    groupadd -g ${USER_GID} ${USER} 2>/dev/null || true && \
+    useradd -u ${USER_UID} -g ${USER_GID} -G music -m -s /bin/bash ${USER}
 
-# Directorio de trabajo
-WORKDIR /app
+# Crear directorios necesarios
+RUN mkdir -p /app /app/data /app/logs /app/static /app/templates /app/images \
+    && chown -R ${USER}:${USER} /app
 
-# Copiar requirements y instalar dependencias Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Instalar Pillow para procesamiento de imágenes
-RUN pip install --no-cache-dir Pillow
+# Instalar dependencias de Python
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copiar archivos de la aplicación
-COPY app.py music_manager.py config.ini ./
-COPY telegram_notifier.py /app/
-COPY templates/ ./templates/
+COPY . /app/
+WORKDIR /app
 
-# IMPORTANTE: Copiar imágenes pre-procesadas al contenedor
-# Este directorio debe existir antes del build (creado por extract_images.py)
-COPY container_images/ /app/images/
+# Configurar Nginx
+COPY docker/nginx.conf /etc/nginx/sites-available/default
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
 
-# Verificar que las imágenes se copiaron correctamente
-RUN echo "📊 Verificando imágenes copiadas..." && \
-    if [ -d "/app/images" ]; then \
-        IMAGE_COUNT=$(find /app/images -type f \( -name "*.jpg" -o -name "*.png" -o -name "*.jpeg" \) | wc -l); \
-        echo "✅ Imágenes encontradas: $IMAGE_COUNT archivos"; \
-        if [ -f "/app/images/master_index.json" ]; then \
-            echo "✅ Índice maestro disponible"; \
-            # Mostrar estadísticas del índice
-            python3 -c "
-import json
-with open('/app/images/master_index.json', 'r') as f:
-    data = json.load(f)
-    artists = len(data.get('artists', {}))
-    albums = len(data.get('albums', {}))
-    print(f'📊 Índice: {artists} artistas, {albums} álbumes')
-" || echo "⚠️  Error leyendo índice"; \
-        else \
-            echo "❌ Índice maestro no encontrado"; \
-            echo "   Ejecuta 'extract_images.py' antes de construir"; \
-            exit 1; \
-        fi; \
-    else \
-        echo "❌ Directorio de imágenes no encontrado"; \
-        echo "   Ejecuta 'extract_images.py' antes de construir"; \
-        exit 1; \
-    fi
+# Configurar Supervisor
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Configurar permisos - CORREGIDO para www-data
-RUN chown -R www-data:www-data /app/images && \
-    chmod -R 755 /app/images && \
-    chmod -R 755 /app && \
-    chmod +x /app/app.py
+# Crear archivo de salud para healthcheck
+RUN echo '<html><body>OK</body></html>' > /app/static/health.html
 
-# También asegurar que el usuario de la aplicación puede leer las imágenes
-RUN ls -la /app/images/ && \
-    ls -la /app/images/artists/ | head -5 && \
-    ls -la /app/images/albums/ | head -5
-    
-# Copiar solo el entrypoint (sin nginx/supervisor)
-COPY entrypoint.sh /entrypoint.sh
+# Configurar permisos (solo directorios que necesitan escritura)
+RUN chown -R ${USER}:${USER} /app/logs /app/images
+# NO chown de /app completo para evitar problemas con archivos read-only
+RUN chown -R ${USER}:${USER} /var/log/nginx
+RUN chown -R ${USER}:${USER} /var/lib/nginx
+
+# Exponer puertos
+EXPOSE 80 5157
+
+# Script de entrada
+COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Exponer solo el puerto de Flask
-EXPOSE 8447
-
-# Volúmenes para datos persistentes (SIN imágenes, ya están copiadas)
-VOLUME ["/app/data", "/downloads", "/app/logs"]
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8447/api/stats || exit 1
-
-# Entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

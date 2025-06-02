@@ -1,302 +1,104 @@
 #!/bin/bash
 set -e
 
-echo "🎵 Iniciando Music Web Explorer..."
+echo "=== Iniciando Music Web Explorer ==="
 
-# Leer configuración del config.ini
-CONFIG_FILE="/app/config.ini"
-if [ -f "$CONFIG_FILE" ]; then
-    # Leer usuario del contenedor desde config.ini
-    CONTAINER_USER=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('container', 'user', fallback='appuser'))
-except:
-    print('appuser')
-" 2>/dev/null || echo "appuser")
-    
-    # Leer UID/GID del contenedor desde config.ini
-    CONTAINER_UID=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('container', 'uid', fallback='1000'))
-except:
-    print('1000')
-" 2>/dev/null || echo "1000")
-    
-    CONTAINER_GID=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('container', 'gid', fallback='1000'))
-except:
-    print('1000')
-" 2>/dev/null || echo "1000")
-    
-    # Leer configuración SSH desde config.ini
-    SSH_USER=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('download', 'ssh_user', fallback='pepe'))
-except:
-    print('pepe')
-" 2>/dev/null || echo "pepe")
-    
-    SSH_HOST=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('download', 'ssh_host', fallback='pepecono'))
-except:
-    print('pepecono')
-" 2>/dev/null || echo "pepecono")
-    
-    SSH_KEY_PATH=$(python3 -c "
-import configparser
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-try:
-    print(c.get('download', 'ssh_key_path', fallback=''))
-except:
-    print('')
-" 2>/dev/null || echo "")
-    
-    echo "📋 Configuración leída del config.ini:"
-    echo "   👤 Usuario contenedor: $CONTAINER_USER (UID:$CONTAINER_UID GID:$CONTAINER_GID)"
-    echo "   🔗 SSH destino: $SSH_USER@$SSH_HOST"
-    echo "   🔑 Clave SSH desde config: $SSH_KEY_PATH"
-else
-    echo "⚠️  config.ini no encontrado, usando valores por defecto"
-    CONTAINER_USER="appuser"
-    CONTAINER_UID="1000"
-    CONTAINER_GID="1000"
-    SSH_USER="pepe"
-    SSH_HOST="pepecono"
-    SSH_KEY_PATH=""
+# Función para logging
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Crear directorios necesarios si no existen
+log "Creando directorios necesarios..."
+mkdir -p /app/logs /app/data /app/images /app/static/images /downloads
+
+# Configurar SSH si está disponible
+if [ -d "/tmp/host_ssh" ]; then
+    log "Configurando SSH..."
+    mkdir -p /home/$USER/.ssh
+    cp -r /tmp/host_ssh/* /home/$USER/.ssh/ 2>/dev/null || true
+    chown -R $USER:$USER /home/$USER/.ssh
+    chmod 700 /home/$USER/.ssh
+    chmod 600 /home/$USER/.ssh/* 2>/dev/null || true
 fi
 
-# Crear directorios necesarios
-mkdir -p /app/data /app/music /downloads /app/logs /app/static /app/images
-
-# Manejar creación de usuario de forma más robusta
-echo "➕ Configurando usuario de ejecución..."
-
-# Verificar si ya existe un usuario con ese UID
-EXISTING_USER=$(getent passwd "$CONTAINER_UID" | cut -d: -f1 || echo "")
-
-if [ -n "$EXISTING_USER" ]; then
-    echo "👤 Usuario existente con UID $CONTAINER_UID: $EXISTING_USER"
-    if [ "$EXISTING_USER" != "$CONTAINER_USER" ]; then
-        echo "🔄 Usando usuario existente: $EXISTING_USER"
-        CONTAINER_USER="$EXISTING_USER"
-    fi
-else
-    # Crear grupo si no existe
-    if ! getent group "$CONTAINER_GID" >/dev/null 2>&1; then
-        groupadd -g "$CONTAINER_GID" "$CONTAINER_USER" || echo "⚠️  No se pudo crear grupo"
-    fi
-    
-    # Crear usuario si no existe
-    if ! id "$CONTAINER_USER" >/dev/null 2>&1; then
-        useradd -u "$CONTAINER_UID" -g "$CONTAINER_GID" -m -s /bin/bash "$CONTAINER_USER" || {
-            echo "⚠️  No se pudo crear usuario $CONTAINER_USER, usando root"
-            CONTAINER_USER="root"
-        }
-    fi
-fi
-
-echo "✅ Usuario de ejecución final: $CONTAINER_USER"
-
-# Configurar permisos
-echo "📁 Configurando permisos..."
-
-# Solo cambiar permisos en directorios de escritura
-if [ -w "/downloads" ]; then
-    chown -R "$CONTAINER_USER":"$CONTAINER_USER" /downloads 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /downloads"
-fi
-
-if [ -w "/app/logs" ]; then
-    chown -R "$CONTAINER_USER":"$CONTAINER_USER" /app/logs 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /app/logs"
-fi
-
-if [ -w "/app/static" ]; then
-    chown -R www-data:www-data /app/static 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /app/static"
-fi
-
-# NUEVO: Configurar directorio de imágenes
-echo "🖼️  Configurando directorio de imágenes..."
-if [ -w "/app/images" ]; then
-    chown -R "$CONTAINER_USER":"$CONTAINER_USER" /app/images 2>/dev/null || echo "⚠️  No se pudieron cambiar permisos de /app/images"
-fi
-
-# Verificar si hay imágenes disponibles
-if [ -d "/app/images" ] && [ "$(ls -A /app/images 2>/dev/null)" ]; then
-    IMAGE_COUNT=$(find /app/images -type f \( -name "*.jpg" -o -name "*.png" -o -name "*.jpeg" \) | wc -l)
-    TOTAL_SIZE=$(du -sh /app/images 2>/dev/null | cut -f1)
-    echo "✅ Imágenes disponibles: $IMAGE_COUNT archivos ($TOTAL_SIZE)"
-    
-    # Verificar índice maestro
-    if [ -f "/app/images/master_index.json" ]; then
-        echo "✅ Índice maestro de imágenes encontrado"
-    else
-        echo "⚠️  Índice maestro de imágenes no encontrado"
-    fi
-else
-    echo "⚠️  No se encontraron imágenes en /app/images"
-    echo "   Las carátulas e imágenes de artistas no estarán disponibles"
-    echo "   Para solucionarlo:"
-    echo "   1. Ejecuta 'extract_images.py' ANTES de construir el contenedor"
-    echo "   2. Monta el directorio con imágenes en /app/images"
-fi
-
-# Verificar base de datos (pero NO cambiar permisos - es solo lectura)
+# Verificar base de datos
 if [ -f "/app/data/musica.sqlite" ]; then
-    echo "✅ Base de datos encontrada en /app/data/musica.sqlite"
+    log "Base de datos encontrada: /app/data/musica.sqlite"
+    # Verificar permisos de lectura sin intentar cambiar ownership
     if [ -r "/app/data/musica.sqlite" ]; then
-        echo "✅ Base de datos es legible"
+        log "✓ Base de datos accesible"
     else
-        echo "❌ Base de datos no es legible"
+        log "⚠ Advertencia: Base de datos no es legible"
     fi
 else
-    echo "⚠️  Base de datos no encontrada en /app/data/musica.sqlite"
-    echo "   Asegúrate de montar el volumen con la base de datos"
+    log "⚠ Advertencia: Base de datos no encontrada en /app/data/musica.sqlite"
 fi
 
-# Configurar SSH si es necesario
-if [ -n "$SSH_KEY_PATH" ] && [ -f "/tmp/host_ssh/$(basename "$SSH_KEY_PATH")" ]; then
-    echo "🔍 Configurando SSH para usuario $CONTAINER_USER..."
-    
-    USER_HOME=$(getent passwd "$CONTAINER_USER" | cut -d: -f6)
-    if [ -z "$USER_HOME" ]; then
-        USER_HOME="/home/$CONTAINER_USER"
-    fi
-    
-    mkdir -p "$USER_HOME/.ssh"
-    
-    # Copiar clave SSH
-    SSH_KEY_NAME=$(basename "$SSH_KEY_PATH")
-    echo "📋 Copiando clave SSH: /tmp/host_ssh/$SSH_KEY_NAME → $USER_HOME/.ssh/$SSH_KEY_NAME"
-    cp "/tmp/host_ssh/$SSH_KEY_NAME" "$USER_HOME/.ssh/$SSH_KEY_NAME"
-    chmod 600 "$USER_HOME/.ssh/$SSH_KEY_NAME"
-    
-    # Copiar config SSH si existe
-    if [ -f "/tmp/host_ssh/config" ]; then
-        echo "📋 Copiando config SSH: /tmp/host_ssh/config → $USER_HOME/.ssh/config"
-        cp "/tmp/host_ssh/config" "$USER_HOME/.ssh/config"
-        chmod 600 "$USER_HOME/.ssh/config"
-    fi
-    
-    # Configurar permisos
-    chown -R "$CONTAINER_USER":"$CONTAINER_USER" "$USER_HOME/.ssh" 2>/dev/null || true
-    chmod 700 "$USER_HOME/.ssh"
-    
-    echo "✅ Clave SSH configurada: $USER_HOME/.ssh/$SSH_KEY_NAME"
-    
-    # Verificar conectividad SSH
-    echo "🔍 Verificando conectividad SSH a $SSH_HOST..."
-    if su - "$CONTAINER_USER" -c "ssh -i '$USER_HOME/.ssh/$SSH_KEY_NAME' -o ConnectTimeout=5 -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST 'echo OK'" 2>/dev/null; then
-        echo "✅ Conectividad SSH verificada"
+# Verificar directorio de música NFS
+if [ -d "/mnt/NFS/moode/moode" ]; then
+    log "✓ Directorio de música NFS encontrado"
+    # Verificar acceso de lectura sin listar contenido
+    if [ -r "/mnt/NFS/moode/moode" ]; then
+        log "✓ Directorio NFS accesible para lectura"
+        # Intentar contar archivos sin mostrar errores
+        MUSIC_COUNT=$(find /mnt/NFS/moode/moode -maxdepth 1 -type f 2>/dev/null | wc -l)
+        log "Archivos en directorio raíz NFS: $MUSIC_COUNT"
     else
-        echo "⚠️  No se puede conectar SSH a $SSH_HOST"
-        echo "   Verifica la clave SSH y la conectividad de red"
+        log "⚠ Advertencia: Directorio NFS no es legible"
     fi
 else
-    echo "⚠️  No se encontró configuración SSH válida"
-    echo "   Las descargas SSH no funcionarán"
+    log "⚠ Advertencia: Directorio NFS no encontrado"
 fi
 
-# Crear página de health check
-cat > /app/static/health.html << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Music Explorer - Health Check</title>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial; text-align: center; margin: 40px; }
-        .status { padding: 20px; margin: 20px; border-radius: 10px; }
-        .ok { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; }
-    </style>
-</head>
-<body>
-    <h1>🎵 Music Web Explorer</h1>
-    <h2>Container Health Check</h2>
-    <div class="status ok">✅ Contenedor funcionando</div>
-    <p><a href="/">Ir a la aplicación</a></p>
-    <div style="margin-top: 20px; font-size: 12px; color: #666;">
-        Timestamp: $(date)
-    </div>
-</body>
-</html>
-EOF
-
-echo "✅ Configuración inicial completada"
-echo "🌐 Acceso web: http://localhost:8447"
-echo "🔌 API directa: http://localhost:5157"
-echo "📁 Directorio de descargas: /downloads"
-echo "👤 Usuario de ejecución: $CONTAINER_USER (UID:$CONTAINER_UID)"
-echo "🔗 SSH configurado para: $SSH_USER@$SSH_HOST"
-
-# Actualizar configuración de supervisor dinámicamente
-if [ -f "/etc/supervisor/conf.d/supervisord.conf" ]; then
-    echo "🔧 Actualizando configuración de supervisor..."
-    
-    # Crear nueva configuración de supervisor con el usuario correcto
-    cat > /etc/supervisor/conf.d/supervisord.conf << EOF
-[supervisord]
-nodaemon=true
-user=root
-logfile=/app/logs/supervisord.log
-childlogdir=/app/logs/
-
-[program:flask_app]
-command=python3 /app/app.py
-directory=/app
-user=$CONTAINER_USER
-autostart=true
-autorestart=true
-stdout_logfile=/app/logs/flask_app.log
-stderr_logfile=/app/logs/flask_app_error.log
-environment=PYTHONUNBUFFERED=1,USER="$CONTAINER_USER",CONTAINER_UID="$CONTAINER_UID",HOME="/home/$CONTAINER_USER"
-
-[program:nginx]
-command=/usr/sbin/nginx -g "daemon off;"
-user=root
-autostart=true
-autorestart=true
-stdout_logfile=/app/logs/nginx.log
-stderr_logfile=/app/logs/nginx_error.log
-EOF
-
-    echo "🚀 Iniciando servicios con supervisor..."
-    exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+# Verificar directorio de descargas
+if [ -d "/downloads" ]; then
+    log "✓ Directorio de descargas montado"
+    chown $USER:$USER /downloads 2>/dev/null || true
 else
-    echo "⚠️  Supervisor no encontrado, iniciando Flask directamente..."
-    echo "👤 Cambiando a usuario: $CONTAINER_USER"
-    echo "🚀 Iniciando Flask directamente en puerto 8447..."
-    cd /app
-
-    # Configurar variables de entorno
-    export USER="$CONTAINER_USER"
-    export CONTAINER_UID="$CONTAINER_UID"
-    export PYTHONUNBUFFERED=1
-
-    if [ "$CONTAINER_USER" = "root" ]; then
-        export HOME="/root"
-        echo "🔧 Ejecutando como root..."
-        exec python3 app.py
-    else
-        export HOME="/home/$CONTAINER_USER"
-        echo "🔧 Ejecutando como usuario $CONTAINER_USER..."
-        exec su - "$CONTAINER_USER" -c "cd /app && USER='$CONTAINER_USER' CONTAINER_UID='$CONTAINER_UID' HOME='/home/$CONTAINER_USER' PYTHONUNBUFFERED=1 python3 app.py"
-    fi
+    log "⚠ Advertencia: Directorio de descargas no encontrado"
 fi
+
+# Configurar permisos para nginx (solo directorios escribibles)
+log "Configurando permisos para nginx..."
+chown -R $USER:$USER /app/logs 2>/dev/null || true
+chown -R $USER:$USER /app/images 2>/dev/null || true
+chown -R $USER:$USER /downloads 2>/dev/null || true
+
+# NO cambiar permisos de archivos read-only:
+# - /app/data/musica.sqlite (montado :ro)
+# - /app/config.yml (montado :ro)
+
+# Configurar nginx solo si los directorios existen y son escribibles
+[ -w /var/log/nginx ] && chown -R $USER:$USER /var/log/nginx 2>/dev/null || true
+[ -w /var/lib/nginx ] && chown -R $USER:$USER /var/lib/nginx 2>/dev/null || true
+
+# Inicializar configuración si no existe
+if [ ! -f "/app/config.ini" ] && [ -f "/app/config.yml" ]; then
+    log "Usando configuración por defecto"
+fi
+
+# Variables de entorno de Telegram
+export TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-""}
+export TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-""}
+export TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-"false"}
+
+log "Configuración de Telegram:"
+log "  Habilitado: $TELEGRAM_ENABLED"
+log "  Bot Token: ${TELEGRAM_BOT_TOKEN:0:10}..." # Solo primeros 10 caracteres
+log "  Chat ID: $TELEGRAM_CHAT_ID"
+
+# Probar aplicación Flask
+log "Verificando aplicación Flask..."
+cd /app
+python3 -c "import app; print('✓ Aplicación Flask cargada correctamente')" || {
+    log "❌ Error cargando aplicación Flask"
+    exit 1
+}
+
+log "=== Iniciando servicios ==="
+log "  - Nginx: puerto 80"
+log "  - Flask: puerto 5157"
+
+# Ejecutar comando principal
+exec "$@"

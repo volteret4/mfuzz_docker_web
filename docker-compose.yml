@@ -20,7 +20,7 @@ services:
       - /home/huan/.ssh:/tmp/host_ssh:ro
       
       # Configuración personalizada (opcional)
-      - /home/huan/gits/pollo/mfuzz_docker_web/config.ini:/app/config.ini:ro
+      - /home/huan/gits/pollo/mfuzz_docker_web/config.yml:/app/config.yml:ro
     
       - /mnt/NFS/moode/moode:/mnt/NFS/moode/moode:ro
 
@@ -34,13 +34,15 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Madrid
-      - USER=dietpi
+      - USER=1000
       # Configuración de Telegram
       - TELEGRAM_BOT_TOKEN=5497935650:AAHZSY-Jw9OxQx2qwKcQtBH2D7ej9GyGaio
       - TELEGRAM_CHAT_ID=905051261
       # Habilitar/deshabilitar notificaciones
       - TELEGRAM_ENABLED=true
-
+      # CONFIGURACIÓN PARA PERMISOS NFS
+      - PUID=1000
+      - PGID=1001
     restart: unless-stopped
     
     healthcheck:
