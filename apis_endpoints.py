@@ -1481,39 +1481,106 @@ class APIEndpoints:
                 logger.error(f"Error obteniendo modo de descarga: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        # Reemplazar el endpoint /api/artists/list en apis_endpoints.py
+
         @self.app.route('/api/artists/list')
         def api_get_artists_list():
-            """Lista todos los artistas para el selector"""
+            """Lista todos los artistas para el selector - VERSIÓN MEJORADA"""
             try:
-                limit = min(int(request.args.get('limit', 1000)), 2000)
+                limit = min(int(request.args.get('limit', 5000)), 10000)  # Aumentar límite
+                search = request.args.get('search', '').strip()
+                
+                logger.info(f"Solicitando lista de artistas: limit={limit}, search='{search}'")
                 
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
                 
-                # Consulta simple para obtener artistas
-                query = """
-                    SELECT id, name
-                    FROM artists 
-                    WHERE name IS NOT NULL AND name != ''
-                    ORDER BY name
-                    LIMIT ?
-                """
+                # Consulta base
+                if search:
+                    # Si hay búsqueda, filtrar
+                    query = """
+                        SELECT id, name
+                        FROM artists 
+                        WHERE name IS NOT NULL 
+                        AND name != '' 
+                        AND name LIKE ?
+                        ORDER BY name
+                        LIMIT ?
+                    """
+                    params = (f"%{search}%", limit)
+                else:
+                    # Sin búsqueda, todos los artistas
+                    query = """
+                        SELECT id, name
+                        FROM artists 
+                        WHERE name IS NOT NULL AND name != ''
+                        ORDER BY name
+                        LIMIT ?
+                    """
+                    params = (limit,)
                 
-                rows = self.db_manager.execute_query(query, (limit,))
+                logger.debug(f"Ejecutando consulta: {query}")
+                logger.debug(f"Parámetros: {params}")
                 
-                artists = [
-                    {
-                        'id': row['id'],
-                        'name': row['name']
+                rows = self.db_manager.execute_query(query, params)
+                
+                logger.info(f"Encontrados {len(rows)} artistas en la consulta")
+                
+                if not rows:
+                    # Diagnóstico si no hay resultados
+                    count_query = "SELECT COUNT(*) as total FROM artists WHERE name IS NOT NULL AND name != ''"
+                    count_result = self.db_manager.execute_query(count_query)
+                    total_count = count_result[0]['total'] if count_result else 0
+                    
+                    logger.warning(f"No se encontraron artistas. Total en BD: {total_count}")
+                    
+                    return jsonify({
+                        'artists': [],
+                        'total': 0,
+                        'debug': {
+                            'total_in_db': total_count,
+                            'search_term': search,
+                            'limit': limit
+                        }
+                    })
+                
+                artists = []
+                for row in rows:
+                    try:
+                        artist = {
+                            'id': row['id'],
+                            'name': row['name']
+                        }
+                        artists.append(artist)
+                    except Exception as e:
+                        logger.warning(f"Error procesando artista: {e}")
+                        continue
+                
+                logger.info(f"Devolviendo {len(artists)} artistas procesados")
+                
+                return jsonify({
+                    'artists': artists, 
+                    'total': len(artists),
+                    'debug': {
+                        'raw_rows': len(rows),
+                        'processed': len(artists),
+                        'search_term': search,
+                        'limit_used': limit
                     }
-                    for row in rows
-                ]
-                
-                return jsonify({'artists': artists, 'total': len(artists)})
+                })
                 
             except Exception as e:
                 logger.error(f"Error obteniendo lista de artistas: {e}")
-                return jsonify({'error': str(e)}), 500
+                return jsonify({
+                    'error': str(e),
+                    'artists': [],
+                    'total': 0,
+                    'debug': {
+                        'exception': str(e),
+                        'db_path': self.db_manager.db_path if self.db_manager else 'No DB',
+                        'db_exists': os.path.exists(self.db_manager.db_path) if self.db_manager else False
+                    }
+                }), 500
 
         @self.app.route('/api/artists/<int:artist_id>/analysis/<analysis_type>')
         def api_artist_analysis(artist_id, analysis_type):
@@ -1547,6 +1614,87 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error en análisis {analysis_type} para artista {artist_id}: {e}")
                 return jsonify({'error': str(e)}), 500
+
+
+        @self.app.route('/api/debug/artists')
+        def api_debug_artists():
+            """Debug de artistas - investigar por qué no aparecen todos"""
+            try:
+                debug_info = {}
+                
+                # 1. Contar total de artistas en la BD
+                total_query = "SELECT COUNT(*) as total FROM artists"
+                total_result = self.db_manager.execute_query(total_query)
+                total_artists = total_result[0]['total'] if total_result else 0
+                
+                # 2. Contar artistas con nombre válido
+                valid_name_query = "SELECT COUNT(*) as count FROM artists WHERE name IS NOT NULL AND name != ''"
+                valid_name_result = self.db_manager.execute_query(valid_name_query)
+                valid_name_count = valid_name_result[0]['count'] if valid_name_result else 0
+                
+                # 3. Primeros 10 artistas para verificar datos
+                sample_query = "SELECT id, name FROM artists WHERE name IS NOT NULL AND name != '' ORDER BY name LIMIT 10"
+                sample_artists = self.db_manager.execute_query(sample_query)
+                
+                # 4. Últimos 10 artistas
+                last_query = "SELECT id, name FROM artists WHERE name IS NOT NULL AND name != '' ORDER BY id DESC LIMIT 10"
+                last_artists = self.db_manager.execute_query(last_query)
+                
+                # 5. Artistas con álbumes
+                with_albums_query = """
+                    SELECT COUNT(DISTINCT a.id) as count 
+                    FROM artists a 
+                    JOIN albums al ON a.id = al.artist_id 
+                    WHERE a.name IS NOT NULL AND a.name != ''
+                """
+                with_albums_result = self.db_manager.execute_query(with_albums_query)
+                with_albums_count = with_albums_result[0]['count'] if with_albums_result else 0
+                
+                # 6. Buscar un artista específico para test
+                test_search = "SELECT id, name FROM artists WHERE name LIKE '%a%' LIMIT 5"
+                test_results = self.db_manager.execute_query(test_search)
+                
+                # 7. Verificar endpoint /api/artists/list
+                try:
+                    artists_list = []
+                    list_query = """
+                        SELECT id, name
+                        FROM artists 
+                        WHERE name IS NOT NULL AND name != ''
+                        ORDER BY name
+                        LIMIT 100
+                    """
+                    list_results = self.db_manager.execute_query(list_query, ())
+                    artists_list = [{'id': row['id'], 'name': row['name']} for row in list_results]
+                except Exception as e:
+                    artists_list = f"Error: {str(e)}"
+                
+                debug_info = {
+                    'database_path': self.db_manager.db_path,
+                    'database_exists': os.path.exists(self.db_manager.db_path),
+                    'connection_test': self.db_manager.test_connection(),
+                    'totals': {
+                        'total_artists': total_artists,
+                        'valid_name_artists': valid_name_count,
+                        'artists_with_albums': with_albums_count
+                    },
+                    'samples': {
+                        'first_10': [dict(row) for row in sample_artists],
+                        'last_10': [dict(row) for row in last_artists],
+                        'test_search': [dict(row) for row in test_results]
+                    },
+                    'api_list_test': {
+                        'count': len(artists_list) if isinstance(artists_list, list) else 0,
+                        'first_5': artists_list[:5] if isinstance(artists_list, list) else artists_list
+                    }
+                }
+                
+                return jsonify(debug_info)
+                
+            except Exception as e:
+                logger.error(f"Error en debug de artistas: {e}")
+                return jsonify({'error': str(e), 'traceback': str(e)}), 500
+
 
 # Otras funciones
 
@@ -2264,14 +2412,15 @@ class APIEndpoints:
             return {'error': str(e)}
 
     def _get_concerts_analysis_simple(self, artist_id):
-        """Análisis de conciertos simplificado"""
+        """Análisis de conciertos simplificado - CORREGIDO PARA RENDERIZACIÓN"""
         try:
             # Conciertos por año
             concerts_query = """
                 SELECT substr(eventDate, 1, 4) as year, COUNT(*) as concerts
                 FROM artists_setlistfm 
-                WHERE artist_id = ? AND eventDate IS NOT NULL
+                WHERE artist_id = ? AND eventDate IS NOT NULL AND eventDate != ''
                 GROUP BY year
+                HAVING year IS NOT NULL AND year != ''
                 ORDER BY year
             """
             concerts_data = self.db_manager.execute_query(concerts_query, (artist_id,))
@@ -2280,7 +2429,7 @@ class APIEndpoints:
             songs_query = """
                 SELECT sets
                 FROM artists_setlistfm 
-                WHERE artist_id = ? AND sets IS NOT NULL
+                WHERE artist_id = ? AND sets IS NOT NULL AND sets != ''
             """
             setlist_data = self.db_manager.execute_query(songs_query, (artist_id,))
             
@@ -2297,42 +2446,56 @@ class APIEndpoints:
             for row in concerts_data:
                 try:
                     year = int(row['year'])
-                    count = row['concerts']
-                    total_concerts += count
-                    concerts_by_year.append({'year': year, 'concerts': count})
-                except:
+                    if year > 1900 and year <= 2030:  # Filtrar años válidos
+                        count = row['concerts']
+                        total_concerts += count
+                        concerts_by_year.append({'year': year, 'concerts': count})
+                except (ValueError, TypeError):
                     continue
             
-            # Procesar canciones
+            # Procesar canciones más tocadas
             song_counts = Counter()
+            valid_setlists = 0
+            
             for row in setlist_data:
                 try:
-                    sets_data = json.loads(row['sets']) if row['sets'] else []
-                    for set_data in sets_data:
-                        if isinstance(set_data, dict) and 'song' in set_data:
-                            songs = set_data['song']
-                            if isinstance(songs, list):
-                                for song in songs:
-                                    if isinstance(song, dict) and 'name' in song:
-                                        song_counts[song['name']] += 1
-                except:
+                    if row['sets']:
+                        sets_data = json.loads(row['sets'])
+                        valid_setlists += 1
+                        
+                        if isinstance(sets_data, list):
+                            for set_data in sets_data:
+                                if isinstance(set_data, dict) and 'song' in set_data:
+                                    songs = set_data['song']
+                                    if isinstance(songs, list):
+                                        for song in songs:
+                                            if isinstance(song, dict) and 'name' in song:
+                                                song_name = song['name'].strip()
+                                                if song_name:
+                                                    song_counts[song_name] += 1
+                                            elif isinstance(song, str) and song.strip():
+                                                song_counts[song.strip()] += 1
+                except (json.JSONDecodeError, TypeError, KeyError):
                     continue
             
-            top_songs = [{'song': song, 'plays': count} for song, count in song_counts.most_common(15)]
+            # Datos para gráficos
+            top_songs = [{'song': song, 'plays': count} for song, count in song_counts.most_common(12)]
             
             # Países visitados
             countries_query = """
-                SELECT DISTINCT country_name
+                SELECT DISTINCT country_name, COUNT(*) as concerts
                 FROM artists_setlistfm 
-                WHERE artist_id = ? AND country_name IS NOT NULL
+                WHERE artist_id = ? AND country_name IS NOT NULL AND country_name != ''
+                GROUP BY country_name
+                ORDER BY concerts DESC
             """
             countries_data = self.db_manager.execute_query(countries_query, (artist_id,))
             
             # Último concierto
             last_concert_query = """
-                SELECT eventDate
+                SELECT eventDate, venue_name, city_name
                 FROM artists_setlistfm 
-                WHERE artist_id = ? AND eventDate IS NOT NULL
+                WHERE artist_id = ? AND eventDate IS NOT NULL AND eventDate != ''
                 ORDER BY eventDate DESC
                 LIMIT 1
             """
@@ -2341,17 +2504,34 @@ class APIEndpoints:
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
             
-            charts = {
-                'concerts_timeline': stats_manager.create_chart('line', concerts_by_year, 'Conciertos por Año', 'year', 'concerts'),
-                'most_played_songs': stats_manager.create_chart('bar', top_songs, 'Canciones Más Tocadas', 'song', 'plays')
-            }
+            charts = {}
+            
+            # Timeline de conciertos (siempre intentar crear)
+            if concerts_by_year:
+                charts['concerts_timeline'] = stats_manager.create_chart('line', concerts_by_year, 
+                                            'Conciertos por Año', 'year', 'concerts')
+            
+            # Canciones más tocadas (solo si hay datos)
+            if top_songs:
+                charts['most_played_songs'] = stats_manager.create_chart('bar', top_songs, 
+                                            'Canciones Más Tocadas en Vivo', 'song', 'plays')
+            
+            # Países visitados (si hay datos)
+            if countries_data and len(countries_data) > 1:
+                countries_chart_data = [{'country': row['country_name'], 'concerts': row['concerts']} 
+                                      for row in countries_data[:10]]
+                charts['countries_visited'] = stats_manager.create_chart('pie', countries_chart_data,
+                                            'Países Visitados', 'country', 'concerts')
             
             return {
                 'charts': charts,
                 'stats': {
                     'total_concerts': total_concerts,
                     'countries_visited': len(countries_data),
-                    'last_concert_date': last_concert[0]['eventDate'] if last_concert else 'N/A'
+                    'last_concert_date': last_concert[0]['eventDate'] if last_concert else 'N/A',
+                    'last_concert_venue': f"{last_concert[0]['venue_name']}, {last_concert[0]['city_name']}" if last_concert and last_concert[0]['venue_name'] else 'N/A',
+                    'unique_songs_played': len(song_counts),
+                    'total_setlists': valid_setlists
                 }
             }
             
@@ -2455,7 +2635,7 @@ class APIEndpoints:
             return {'error': str(e)}
 
     def _get_labels_analysis_simple(self, artist_id):
-        """Análisis de sellos simplificado"""
+        """Análisis de sellos simplificado - CORREGIDO PARA TIMELINE"""
         try:
             # Sellos por álbum
             labels_query = """
@@ -2473,7 +2653,7 @@ class APIEndpoints:
             from collections import Counter, defaultdict
             
             labels_count = Counter()
-            labels_timeline = defaultdict(lambda: defaultdict(int))
+            labels_by_year = defaultdict(lambda: defaultdict(int))
             
             for row in labels_data:
                 label = row['label']
@@ -2484,41 +2664,72 @@ class APIEndpoints:
                 
                 try:
                     year_int = int(year) if year else 0
-                    labels_timeline[year_int][label] += count
+                    if year_int > 1900:  # Filtrar años válidos
+                        labels_by_year[year_int][label] += count
                 except:
                     pass
             
-            # Datos para gráficos
-            labels_pie_data = [{'label': l, 'count': c} for l, c in labels_count.most_common(10)]
+            # Datos para gráfico circular
+            labels_pie_data = [{'label': l, 'count': c} for l, c in labels_count.most_common(8)]
             
-            # Timeline acumulativo
-            labels_cumulative = []
-            cumulative_totals = defaultdict(int)
-            
-            for year in sorted(labels_timeline.keys()):
-                for label, count in labels_timeline[year].items():
-                    cumulative_totals[label] += count
-                    if label in [item['label'] for item in labels_pie_data[:5]]:
-                        labels_cumulative.append({
-                            'year': year,
+            # Timeline acumulativo CORREGIDO
+            if labels_by_year:
+                # Obtener los top 5 sellos para el timeline
+                top_labels = [item['label'] for item in labels_pie_data[:5]]
+                
+                # Crear datos para timeline
+                timeline_data = []
+                cumulative_totals = defaultdict(int)
+                
+                # Ordenar años
+                sorted_years = sorted(labels_by_year.keys())
+                
+                for year in sorted_years:
+                    for label in top_labels:
+                        # Sumar álbumes de este año
+                        albums_this_year = labels_by_year[year].get(label, 0)
+                        cumulative_totals[label] += albums_this_year
+                        
+                        # Solo añadir puntos donde hay cambios o al final
+                        if albums_this_year > 0 or year == sorted_years[-1]:
+                            timeline_data.append({
+                                'year': year,
+                                'label': label,
+                                'albums': cumulative_totals[label]
+                            })
+                
+                # Si no hay suficientes datos para timeline, crear datos básicos
+                if not timeline_data:
+                    for label, count in labels_count.most_common(5):
+                        timeline_data.append({
+                            'year': 'Total',
                             'label': label,
-                            'cumulative': cumulative_totals[label]
+                            'albums': count
                         })
+            else:
+                timeline_data = []
             
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
             
-            charts = {
-                'labels_pie': stats_manager.create_chart('pie', labels_pie_data, 'Distribución por Sellos', 'label', 'count'),
-                'labels_timeline': stats_manager.create_chart('line', labels_cumulative, 'Álbumes Acumulados por Sello', 'year', 'cumulative')
-            }
+            charts = {}
+            
+            # Gráfico circular siempre
+            charts['labels_pie'] = stats_manager.create_chart('pie', labels_pie_data, 
+                                        'Distribución por Sellos', 'label', 'count')
+            
+            # Timeline solo si hay datos
+            if timeline_data:
+                charts['labels_timeline'] = stats_manager.create_chart('line', timeline_data, 
+                                            'Álbumes Acumulados por Sello', 'year', 'albums')
             
             return {
                 'charts': charts,
                 'stats': {
                     'total_labels': len(labels_count),
                     'main_label': labels_count.most_common(1)[0][0] if labels_count else 'N/A',
-                    'main_label_albums': labels_count.most_common(1)[0][1] if labels_count else 0
+                    'main_label_albums': labels_count.most_common(1)[0][1] if labels_count else 0,
+                    'years_active': len(sorted_years) if 'sorted_years' in locals() else 0
                 }
             }
             
@@ -2686,7 +2897,7 @@ class APIEndpoints:
             return {'error': str(e)}
 
     def _get_collaborators_analysis_simple(self, artist_id):
-        """Análisis de colaboradores simplificado"""
+        """Análisis de colaboradores simplificado - VERSIÓN CORREGIDA PARA JSON"""
         try:
             # Productores, ingenieros y colaboradores de los álbumes
             collaborators_query = """
@@ -2700,6 +2911,7 @@ class APIEndpoints:
                 return {'error': 'No se encontraron datos de colaboradores para este artista'}
             
             from collections import Counter
+            import json
             
             producers = Counter()
             engineers = Counter()
@@ -2708,42 +2920,127 @@ class APIEndpoints:
             for row in collaborators_data:
                 # Productores
                 if row['producers']:
-                    prods = [p.strip() for p in row['producers'].split(',')]
-                    for prod in prods[:5]:  # Limitar
-                        producers[prod] += 1
+                    try:
+                        # Intentar parsear como JSON primero
+                        if row['producers'].strip().startswith('{') or row['producers'].strip().startswith('['):
+                            producers_data = json.loads(row['producers'])
+                            if isinstance(producers_data, dict):
+                                # Extraer nombres de un diccionario JSON
+                                for role, names in producers_data.items():
+                                    if 'producer' in role.lower():
+                                        if isinstance(names, list):
+                                            for name in names[:3]:  # Limitar a 3
+                                                producers[name.strip()] += 1
+                                        elif isinstance(names, str):
+                                            producers[names.strip()] += 1
+                            elif isinstance(producers_data, list):
+                                for name in producers_data[:5]:
+                                    producers[str(name).strip()] += 1
+                        else:
+                            # Fallback: tratar como string separado por comas
+                            prods = [p.strip() for p in row['producers'].split(',')]
+                            for prod in prods[:5]:
+                                if prod:
+                                    producers[prod] += 1
+                    except (json.JSONDecodeError, TypeError):
+                        # Fallback: tratar como string
+                        prods = [p.strip() for p in str(row['producers']).split(',')]
+                        for prod in prods[:5]:
+                            if prod:
+                                producers[prod] += 1
                 
                 # Ingenieros
                 if row['engineers']:
-                    engs = [e.strip() for e in row['engineers'].split(',')]
-                    for eng in engs[:5]:  # Limitar
-                        engineers[eng] += 1
+                    try:
+                        if row['engineers'].strip().startswith('{') or row['engineers'].strip().startswith('['):
+                            engineers_data = json.loads(row['engineers'])
+                            if isinstance(engineers_data, dict):
+                                for role, names in engineers_data.items():
+                                    if any(eng_role in role.lower() for eng_role in ['engineer', 'mastered', 'mixed', 'recorded']):
+                                        if isinstance(names, list):
+                                            for name in names[:3]:
+                                                engineers[name.strip()] += 1
+                                        elif isinstance(names, str):
+                                            engineers[names.strip()] += 1
+                            elif isinstance(engineers_data, list):
+                                for name in engineers_data[:5]:
+                                    engineers[str(name).strip()] += 1
+                        else:
+                            engs = [e.strip() for e in row['engineers'].split(',')]
+                            for eng in engs[:5]:
+                                if eng:
+                                    engineers[eng] += 1
+                    except (json.JSONDecodeError, TypeError):
+                        engs = [e.strip() for e in str(row['engineers']).split(',')]
+                        for eng in engs[:5]:
+                            if eng:
+                                engineers[eng] += 1
                 
-                # Colaboradores (de credits)
+                # Colaboradores (de credits) - MEJORADO PARA JSON
                 if row['credits']:
-                    creds = [c.strip() for c in row['credits'].split(',')]
-                    for cred in creds[:5]:  # Limitar
-                        collaborators[cred] += 1
+                    try:
+                        if row['credits'].strip().startswith('{') or row['credits'].strip().startswith('['):
+                            credits_data = json.loads(row['credits'])
+                            if isinstance(credits_data, dict):
+                                # Extraer todos los nombres de todos los roles
+                                for role, names in credits_data.items():
+                                    if isinstance(names, list):
+                                        for name in names[:3]:  # Limitar para evitar spam
+                                            if isinstance(name, str) and name.strip():
+                                                collaborators[name.strip()] += 1
+                                    elif isinstance(names, str) and names.strip():
+                                        collaborators[names.strip()] += 1
+                            elif isinstance(credits_data, list):
+                                for item in credits_data[:10]:
+                                    if isinstance(item, str):
+                                        collaborators[item.strip()] += 1
+                                    elif isinstance(item, dict):
+                                        # Si es un diccionario, extraer valores
+                                        for value in item.values():
+                                            if isinstance(value, str):
+                                                collaborators[value.strip()] += 1
+                        else:
+                            # Fallback: tratar como string
+                            creds = [c.strip() for c in row['credits'].split(',')]
+                            for cred in creds[:5]:
+                                if cred:
+                                    collaborators[cred] += 1
+                    except (json.JSONDecodeError, TypeError):
+                        # Fallback final
+                        creds = [c.strip() for c in str(row['credits']).split(',')]
+                        for cred in creds[:5]:
+                            if cred:
+                                collaborators[cred] += 1
             
-            # Preparar datos
+            # Preparar datos para gráficos
             producers_data = [{'producer': p, 'count': c} for p, c in producers.most_common(10)]
             engineers_data = [{'engineer': e, 'count': c} for e, c in engineers.most_common(10)]
-            collaborators_data = [{'collaborator': c, 'count': count} for c, count in collaborators.most_common(10)]
+            collaborators_data = [{'collaborator': c, 'count': count} for c, count in collaborators.most_common(15)]
             
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
             
-            charts = {
-                'producers': stats_manager.create_chart('pie', producers_data, 'Productores Frecuentes', 'producer', 'count'),
-                'engineers': stats_manager.create_chart('pie', engineers_data, 'Ingenieros Frecuentes', 'engineer', 'count'),
-                'collaborators': stats_manager.create_chart('pie', collaborators_data, 'Colaboradores Frecuentes', 'collaborator', 'count')
-            }
+            charts = {}
+            
+            if producers_data:
+                charts['producers'] = stats_manager.create_chart('pie', producers_data, 
+                                            'Productores Frecuentes', 'producer', 'count')
+            
+            if engineers_data:
+                charts['engineers'] = stats_manager.create_chart('pie', engineers_data, 
+                                            'Ingenieros Frecuentes', 'engineer', 'count')
+            
+            if collaborators_data:
+                charts['collaborators'] = stats_manager.create_chart('bar', collaborators_data, 
+                                            'Colaboradores Frecuentes', 'collaborator', 'count')
             
             return {
                 'charts': charts,
                 'stats': {
                     'total_producers': len(producers),
                     'total_engineers': len(engineers),
-                    'total_collaborators': len(collaborators)
+                    'total_collaborators': len(collaborators),
+                    'unique_collaborators': len(set(list(producers.keys()) + list(engineers.keys()) + list(collaborators.keys())))
                 }
             }
             

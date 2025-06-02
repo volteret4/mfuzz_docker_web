@@ -49,21 +49,7 @@ class StatsManager:
             self.init_connection()
         return self.conn
     
-    def execute_query(self, query: str, params: tuple = None) -> List[sqlite3.Row]:
-        """Ejecuta una consulta de forma segura"""
-        try:
-            conn = self.get_connection()
-            if not conn:
-                return []
-            cursor = conn.cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            return cursor.fetchall()
-        except Exception as e:
-            logger.error(f"Error ejecutando consulta: {e}")
-            return []
+
     
     def get_database_info(self) -> Dict[str, Any]:
         """Obtiene información general de la base de datos"""
@@ -108,6 +94,21 @@ class StatsManager:
             logger.error(f"Error obteniendo info de BD: {e}")
             return {}
     
+    def execute_query(self, query: str, params: tuple = None) -> List[sqlite3.Row]:
+            """Ejecuta una consulta de forma segura y devuelve los resultados"""
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    if params:
+                        cursor.execute(query, params)
+                    else:
+                        cursor.execute(query)
+                    return cursor.fetchall()
+            except Exception as e:
+                logger.error(f"Error ejecutando consulta: {e}")
+                return []
+
+
     def _get_db_size(self) -> int:
         """Obtiene el tamaño de la base de datos en bytes"""
         try:

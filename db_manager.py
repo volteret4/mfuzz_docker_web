@@ -73,7 +73,21 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error obteniendo info de la base de datos: {e}")
             return None
-    
+        
+    def execute_query(self, query: str, params: tuple = None) -> List[sqlite3.Row]:
+        """Ejecuta una consulta de forma segura y devuelve los resultados"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if params:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error ejecutando consulta: {e}")
+            return []
+
     def search_artists(self, query: str, limit: int = 50) -> List[Dict]:
         """Busca artistas por nombre usando FTS o LIKE"""
         try:
@@ -562,3 +576,29 @@ class DatabaseManager:
                     return path_value
         
         return None
+
+
+    def get_all_artists_list(self, limit=1000):
+        """Obtiene lista de todos los artistas para el selector"""
+        try:
+            query = """
+                SELECT id, name
+                FROM artists 
+                WHERE name IS NOT NULL AND name != ''
+                ORDER BY name
+                LIMIT ?
+            """
+            
+            rows = self.execute_query(query, (limit,))
+            
+            return [
+                {
+                    'id': row['id'],
+                    'name': row['name']
+                }
+                for row in rows
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo lista de artistas: {e}")
+            return []
