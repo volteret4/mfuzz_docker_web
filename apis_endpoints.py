@@ -11,9 +11,15 @@ from werkzeug.utils import secure_filename
 import threading
 import time
 
-from download_manager import DownloadManager
 
 logger = logging.getLogger(__name__)
+
+try:
+    from download_manager import DownloadManager
+except ImportError as e:
+    logger.error(f"Error importando módulos: {e}")
+    raise
+
 
 class APIEndpoints:
     """Maneja todos los endpoints de la API REST"""
