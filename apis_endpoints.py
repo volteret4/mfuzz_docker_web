@@ -1969,9 +1969,25 @@ class APIEndpoints:
             
             # Obtener ruta de origen del álbum
             source_path = self.download_manager.get_album_source_path(album)
-            if not source_path or not os.path.exists(source_path):
-                raise Exception(f"Directorio del álbum no encontrado: {source_path}")
+            if not source_path:
+                raise Exception("No se pudo determinar la ruta del álbum")
             
+            logger.info(f"Ruta de origen para SSH: {source_path}")
+
+            # Verificar si necesitamos usar el directorio padre
+            # Si la ruta termina en "Disc 1", "Disc 2", etc., usar el directorio padre
+            
+            if re.search(r'/Disc \d+$', source_path):
+                parent_path = os.path.dirname(source_path)
+                logger.info(f"Detectado subdirectorio de disco, usando directorio padre: {parent_path}")
+                source_path = parent_path
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante preparación SSH")
+                return
+
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante preparación SSH")

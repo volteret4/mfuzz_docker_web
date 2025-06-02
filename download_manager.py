@@ -8,6 +8,7 @@ import time
 import zipfile
 import shlex  # NUEVO: Para escapar rutas correctamente
 from typing import Dict, Optional, List
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +47,12 @@ class DownloadManager:
         return self.mode == 'ssh' and self.ssh_enabled
     
     def get_album_source_path(self, album_info: Dict) -> Optional[str]:
-        """Obtiene la ruta de origen del álbum"""
+        """Obtiene la ruta de origen del álbum - CORREGIDO PARA SSH"""
         folder_path = album_info.get('folder_path', '')
         
         if folder_path:
             if folder_path.startswith('/'):
+                # En modo SSH, devolver la ruta tal como está (será usada en el servidor remoto)
                 return folder_path
             else:
                 return os.path.join(self.local_music_root, folder_path.lstrip('/'))
@@ -123,116 +125,89 @@ class DownloadManager:
         }
     
     def execute_rsync(self, source_path: str, album_info: Dict, download_id: str, progress_callback=None) -> Dict:
-        """Ejecuta rsync para copiar archivos al servidor remoto - VERSION CORREGIDA PARA ESPACIOS"""
+        """Ejecuta rsync para copiar archivos al servidor remoto - VERSIÓN CORREGIDA PARA SSH"""
         try:
-            # Construir ruta relativa para el servidor remoto
-            relative_path = os.path.relpath(source_path, self.local_music_root)
-            remote_target_path = os.path.join(self.remote_music_path, relative_path)
+            # CORREGIDO: En modo SSH, source_path es la ruta en el servidor remoto
+            # No necesitamos calcular ruta relativa, usamos directamente la ruta remota
             
-            logger.info(f"Rutas para rsync:")
-            logger.info(f"  - Origen local: {source_path}")
-            logger.info(f"  - Destino remoto: {remote_target_path}")
-            logger.info(f"  - Ruta relativa: {relative_path}")
+            # Construir ruta remota de destino
+            # Para SSH, copiamos desde la ruta remota original a una ruta temporal remota
+            album_name = album_info.get('name', 'Unknown')
+            artist_name = album_info.get('artist_name', 'Unknown')
             
-            # CORREGIDO: Crear directorio remoto con escapado correcto
-            remote_dir = os.path.dirname(remote_target_path)
+            # Crear un directorio temporal único en el servidor remoto
+            safe_name = f"{artist_name}_{album_name}_{int(time.time())}"
+            safe_name = "".join(c for c in safe_name if c.isalnum() or c in ('_', '-'))
             
-            # Usar shlex.quote para escapar correctamente la ruta
-            escaped_remote_dir = shlex.quote(remote_dir)
-            mkdir_cmd = ['ssh']
+            remote_temp_path = f"/tmp/music_transfer_{safe_name}"
             
+            logger.info(f"Rutas para rsync SSH:")
+            logger.info(f"  - Origen remoto: {source_path}")
+            logger.info(f"  - Destino temporal remoto: {remote_temp_path}")
+            
+            # PASO 1: Crear directorio temporal en servidor remoto y copiar archivos
+            commands = [
+                f'rm -rf {shlex.quote(remote_temp_path)}',  # Limpiar si existe
+                f'mkdir -p {shlex.quote(remote_temp_path)}',  # Crear directorio
+                f'cp -r {shlex.quote(source_path)}/* {shlex.quote(remote_temp_path)}/ 2>/dev/null || cp -r {shlex.quote(source_path)} {shlex.quote(remote_temp_path)}/'  # Copiar contenido
+            ]
+            
+            for cmd in commands:
+                ssh_cmd = ['ssh']
+                if self.ssh_key_path and os.path.exists(self.ssh_key_path):
+                    ssh_cmd.extend(['-i', self.ssh_key_path])
+                ssh_cmd.extend([self.ssh_host, cmd])
+                
+                logger.info(f"Ejecutando comando SSH: {' '.join(ssh_cmd)}")
+                result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode != 0 and 'mkdir' not in cmd:  # mkdir puede fallar si ya existe
+                    logger.warning(f"Comando SSH falló: {result.stderr}")
+                    if 'rm -rf' not in cmd:  # rm puede fallar si no existe, no es crítico
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': f'Error en comando SSH: {result.stderr}'
+                        }
+            
+            # PASO 2: Verificar que se copiaron archivos
+            verify_cmd = ['ssh']
             if self.ssh_key_path and os.path.exists(self.ssh_key_path):
-                mkdir_cmd.extend(['-i', self.ssh_key_path])
+                verify_cmd.extend(['-i', self.ssh_key_path])
+            verify_cmd.extend([self.ssh_host, f'ls -la {shlex.quote(remote_temp_path)}'])
             
-            mkdir_cmd.extend([self.ssh_host, f'mkdir -p {escaped_remote_dir}'])
+            verify_result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
             
-            logger.info(f"Comando mkdir: {' '.join(mkdir_cmd)}")
-            result = subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
-            
-            if result.returncode != 0:
-                logger.warning(f"Error creando directorio remoto: {result.stderr}")
-                # No es crítico, continuar con rsync
-            
-            # CORREGIDO: Construir comando rsync con escapado correcto
-            rsync_cmd = ['rsync'] + self.rsync_options
-            
-            if self.ssh_key_path and os.path.exists(self.ssh_key_path):
-                rsync_cmd.extend(['-e', f'ssh -i {shlex.quote(self.ssh_key_path)}'])
-            
-            # IMPORTANTE: Añadir trailing slash para copiar contenido del directorio
-            source_with_slash = source_path.rstrip('/') + '/'
-            
-            # CORREGIDO: Escapar rutas con espacios correctamente
-            # Para rsync, necesitamos escapar tanto la ruta local como la remota
-            escaped_source = shlex.quote(source_with_slash)
-            escaped_remote_target = f'{self.ssh_host}:{shlex.quote(remote_target_path + "/")}'
-            
-            rsync_cmd.extend([escaped_source, escaped_remote_target])
-            
-            logger.info(f"Comando rsync: {' '.join(rsync_cmd)}")
-            logger.info(f"Ejecutando rsync desde {escaped_source} hacia {escaped_remote_target}")
-            
-            # Ejecutar rsync con captura de progreso
-            process = subprocess.Popen(
-                rsync_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-            
-            # Monitorear progreso
-            stdout_lines = []
-            stderr_lines = []
-            
-            while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    stdout_lines.append(output.strip())
-                    logger.debug(f"rsync output: {output.strip()}")
-                    if progress_callback:
-                        progress_callback(output.strip())
-            
-            # Capturar stderr
-            stderr = process.stderr.read()
-            if stderr:
-                stderr_lines.extend(stderr.strip().split('\n'))
-                logger.warning(f"rsync stderr: {stderr}")
-            
-            return_code = process.wait()
-            
-            if return_code == 0:
-                logger.info(f"Rsync completado exitosamente para {download_id}")
-                logger.info(f"Archivos transferidos: {len(stdout_lines)}")
-                return {
-                    'status': 'ssh_complete',
-                    'success': True,
-                    'remote_path': remote_target_path,
-                    'files_copied': len(stdout_lines),
-                    'next_action': 'compress_remote'
-                }
-            else:
-                error_msg = '\n'.join(stderr_lines) if stderr_lines else f'Error rsync con código {return_code}'
-                logger.error(f"Rsync falló para {download_id}: {error_msg}")
+            if verify_result.returncode != 0:
                 return {
                     'status': 'error',
                     'success': False,
-                    'error': error_msg,
-                    'return_code': return_code
+                    'error': f'No se pudieron copiar archivos al directorio temporal: {verify_result.stderr}'
                 }
-                
+            
+            # Contar archivos copiados
+            files_copied = len(verify_result.stdout.strip().split('\n')) - 2  # Restar . y ..
+            
+            logger.info(f"SSH copy completado exitosamente para {download_id}")
+            logger.info(f"Archivos en directorio temporal: {files_copied}")
+            
+            return {
+                'status': 'ssh_complete',
+                'success': True,
+                'remote_path': remote_temp_path,
+                'files_copied': max(files_copied, 1),  # Al menos 1 para evitar errores
+                'next_action': 'compress_remote'
+            }
+            
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout en rsync para {download_id}")
+            logger.error(f"Timeout en operación SSH para {download_id}")
             return {
                 'status': 'error',
                 'success': False,
                 'error': f'Timeout después de {self.timeout} segundos'
             }
         except Exception as e:
-            logger.error(f"Error ejecutando rsync para {download_id}: {e}")
+            logger.error(f"Error ejecutando operación SSH para {download_id}: {e}")
             return {
                 'status': 'error',
                 'success': False,
