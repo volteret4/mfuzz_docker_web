@@ -30,6 +30,7 @@ class APIEndpoints:
         self.img_manager = img_manager
         self.telegram_notifier = telegram_notifier
         self.config = config
+        self.download_manager = DownloadManager(config)
         
         # Registro de descargas activas
         self.active_downloads = {}
