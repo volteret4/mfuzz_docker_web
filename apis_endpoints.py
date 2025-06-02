@@ -26,12 +26,16 @@ class APIEndpoints:
         # Registro de descargas activas - MEJORADO
         self.active_downloads = {}
         self.download_cleanup_interval = 3600  # 1 hora
+        self.scheduled_deletions = {}  # NUEVO: Para borrados programados
         
         # Configurar rutas de API
         self.setup_api_routes()
         
         # Programar limpieza de descargas antiguas
         self._schedule_cleanup()
+        
+        # NUEVO: Programar borrados automáticos
+        self._schedule_auto_deletion()
     
     def _schedule_cleanup(self):
         """Programa la limpieza de descargas antiguas"""
@@ -81,7 +85,99 @@ class APIEndpoints:
         except Exception as e:
             logger.error(f"Error limpiando descarga {download_id}: {e}")
 
+    def _schedule_auto_deletion(self):
+        """Programa borrados automáticos de archivos ZIP"""
+        import threading
+        
+        def deletion_worker():
+            while True:
+                try:
+                    current_time = time.time()
+                    files_to_delete = []
+                    
+                    # Verificar archivos programados para borrado
+                    for download_id, deletion_info in list(self.scheduled_deletions.items()):
+                        if current_time >= deletion_info['delete_at']:
+                            files_to_delete.append(download_id)
+                    
+                    # Ejecutar borrados
+                    for download_id in files_to_delete:
+                        self._execute_scheduled_deletion(download_id)
+                    
+                    time.sleep(10)  # Verificar cada 10 segundos
+                    
+                except Exception as e:
+                    logger.error(f"Error en worker de borrado automático: {e}")
+                    time.sleep(30)
+        
+        deletion_thread = threading.Thread(target=deletion_worker, daemon=True)
+        deletion_thread.start()
 
+    def _execute_scheduled_deletion(self, download_id):
+        """Ejecuta un borrado programado"""
+        try:
+            if download_id not in self.scheduled_deletions:
+                return
+            
+            deletion_info = self.scheduled_deletions[download_id]
+            file_path = deletion_info['file_path']
+            
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Archivo ZIP borrado automáticamente: {file_path}")
+                
+                # Notificar borrado
+                try:
+                    album_name = deletion_info.get('album_name', 'Desconocido')
+                    artist_name = deletion_info.get('artist_name', 'Desconocido')
+                    self.telegram_notifier.notify_file_auto_deleted(album_name, artist_name, file_path)
+                except Exception as e:
+                    logger.warning(f"Error notificando borrado automático: {e}")
+            
+            # Actualizar estado en active_downloads si existe
+            if download_id in self.active_downloads:
+                self.active_downloads[download_id]['zip_auto_deleted'] = True
+                self.active_downloads[download_id]['auto_deleted_at'] = time.time()
+            
+            # Remover de programación
+            del self.scheduled_deletions[download_id]
+            
+        except Exception as e:
+            logger.error(f"Error ejecutando borrado programado para {download_id}: {e}")
+
+    def _schedule_zip_deletion(self, download_id, delay_seconds=180):
+        """Programa el borrado de un ZIP después de un delay"""
+        try:
+            if download_id not in self.active_downloads:
+                logger.warning(f"No se puede programar borrado para descarga inexistente: {download_id}")
+                return
+            
+            download_info = self.active_downloads[download_id]
+            file_path = download_info.get('file_path')
+            
+            if not file_path or not os.path.exists(file_path):
+                logger.warning(f"No se puede programar borrado, archivo no existe: {file_path}")
+                return
+            
+            delete_at = time.time() + delay_seconds
+            
+            self.scheduled_deletions[download_id] = {
+                'file_path': file_path,
+                'delete_at': delete_at,
+                'album_name': download_info.get('album_name'),
+                'artist_name': download_info.get('artist_name'),
+                'scheduled_at': time.time(),
+                'delay_seconds': delay_seconds
+            }
+            
+            # Actualizar info de descarga
+            download_info['auto_delete_scheduled'] = True
+            download_info['auto_delete_at'] = delete_at
+            
+            logger.info(f"Programado borrado automático de {file_path} en {delay_seconds} segundos")
+            
+        except Exception as e:
+            logger.error(f"Error programando borrado de ZIP: {e}")
     
     def setup_api_routes(self):
         """Configura todas las rutas de la API"""
@@ -302,64 +398,40 @@ class APIEndpoints:
         
         @self.app.route('/api/download/file/<download_id>')
         def api_download_file(download_id):
-            """Descargar archivo ZIP generado - VERSION ÚNICA Y CORREGIDA"""
+            """Descargar archivo ZIP y programar borrado automático"""
             logger.info(f"Solicitud de descarga para ID: {download_id}")
-            logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
             
-            # Verificar que la descarga existe
             if download_id not in self.active_downloads:
-                logger.error(f"Download ID {download_id} no encontrado en active_downloads")
-                available_downloads = list(self.active_downloads.keys())
-                
-                # Debug adicional
-                logger.error(f"Descargas disponibles: {available_downloads}")
-                for did, info in self.active_downloads.items():
-                    logger.error(f"  - {did}: status={info.get('status')}, album={info.get('album_name')}")
-                
                 return jsonify({
                     'error': 'Descarga no encontrada',
-                    'download_id': download_id,
-                    'active_downloads': available_downloads,
-                    'total_active': len(available_downloads)
+                    'download_id': download_id
                 }), 404
             
             download_info = self.active_downloads[download_id]
-            logger.info(f"Estado de descarga {download_id}: {download_info.get('status')}")
             
-            # Verificar que la descarga está completada
             if download_info['status'] != 'completed':
                 return jsonify({
                     'error': f'Descarga no completada. Estado: {download_info["status"]}',
-                    'status': download_info['status'],
-                    'progress': download_info.get('progress', 0),
-                    'error_detail': download_info.get('error', ''),
-                    'album_name': download_info.get('album_name', ''),
-                    'artist_name': download_info.get('artist_name', '')
+                    'status': download_info['status']
                 }), 400
             
-            # Obtener información del archivo
             file_path = download_info.get('file_path')
             zip_filename = download_info.get('zip_filename', 'album.zip')
             
-            if not file_path:
-                logger.error(f"No hay file_path en download_info: {download_info}")
-                return jsonify({'error': 'Ruta del archivo no encontrada en la descarga'}), 404
-            
-            if not os.path.exists(file_path):
-                logger.error(f"Archivo no existe en la ruta: {file_path}")
-                return jsonify({'error': f'Archivo no existe: {file_path}'}), 404
-            
-            file_size = os.path.getsize(file_path)
-            if file_size == 0:
-                logger.error(f"Archivo está vacío: {file_path}")
-                return jsonify({'error': 'El archivo está vacío'}), 400
-            
-            logger.info(f"Enviando archivo: {file_path} ({file_size} bytes) como {zip_filename}")
+            if not file_path or not os.path.exists(file_path):
+                return jsonify({'error': 'Archivo no encontrado'}), 404
             
             try:
-                # Marcar descarga como entregada
+                # Marcar como descargado
                 download_info['downloaded_at'] = time.time()
                 download_info['download_count'] = download_info.get('download_count', 0) + 1
+                
+                # NUEVO: Programar borrado automático en 180 segundos
+                if not download_info.get('auto_delete_scheduled', False):
+                    self._schedule_zip_deletion(download_id, delay_seconds=180)
+                    logger.info(f"Programado borrado automático en 180 segundos para {download_id}")
+                
+                logger.info(f"Enviando archivo: {file_path} (borrado programado)")
                 
                 return send_file(
                     file_path,
@@ -600,13 +672,486 @@ class APIEndpoints:
                     'cleanup_interval': self.download_cleanup_interval
                 }
             })
+
+
+
+
+        @self.app.route('/api/download/extract/<download_id>', methods=['POST'])
+        def api_extract_album(download_id):
+            """Extraer álbum y borrar ZIP inmediatamente - VERSIÓN MÁS ROBUSTA"""
+            logger.info(f"Solicitud de extracción para ID: {download_id}")
+            
+            # DEBUG: Verificar qué descargas tenemos
+            logger.info(f"Descargas activas disponibles: {list(self.active_downloads.keys())}")
+            
+            # MEJORADA: Búsqueda más flexible
+            actual_download_id = None
+            
+            if download_id in self.active_downloads:
+                actual_download_id = download_id
+                logger.info(f"Encontrado download_id exacto: {download_id}")
+            else:
+                # Buscar por patrones similares
+                possible_matches = []
+                for active_id in self.active_downloads.keys():
+                    if download_id in active_id or active_id in download_id:
+                        possible_matches.append(active_id)
+                
+                if possible_matches:
+                    logger.info(f"Encontrados posibles matches: {possible_matches}")
+                    actual_download_id = possible_matches[0]  # Usar el primero
+                    logger.info(f"Usando download_id: {actual_download_id}")
+                else:
+                    # NUEVA: Búsqueda por timestamp (últimos 10 minutos) y estado completed
+                    current_time = time.time()
+                    recent_completed_downloads = []
+                    
+                    for active_id, info in self.active_downloads.items():
+                        started_at = info.get('started_at', 0)
+                        status = info.get('status', '')
+                        
+                        # Buscar descargas completadas en los últimos 10 minutos
+                        if (current_time - started_at < 600 and status == 'completed'):
+                            recent_completed_downloads.append({
+                                'id': active_id,
+                                'album_name': info.get('album_name', ''),
+                                'artist_name': info.get('artist_name', ''),
+                                'status': status,
+                                'age_seconds': current_time - started_at,
+                                'completed_at': info.get('completed_at', 0)
+                            })
+                    
+                    # Ordenar por más reciente
+                    recent_completed_downloads.sort(key=lambda x: x['completed_at'], reverse=True)
+                    
+                    return jsonify({
+                        'error': 'Descarga no encontrada',
+                        'download_id': download_id,
+                        'available_downloads': list(self.active_downloads.keys()),
+                        'recent_completed_downloads': recent_completed_downloads,
+                        'suggestion': 'Verifica que la descarga haya terminado correctamente',
+                        'help': 'Si hay descargas completadas recientes, intenta usar uno de esos IDs',
+                        'debug': {
+                            'requested_id': download_id,
+                            'total_active': len(self.active_downloads),
+                            'completed_count': len([d for d in self.active_downloads.values() if d.get('status') == 'completed'])
+                        }
+                    }), 404
+            
+            download_info = self.active_downloads[actual_download_id]
+            
+            # Verificar estado - MEJORADO
+            if download_info['status'] != 'completed':
+                return jsonify({
+                    'error': f'Descarga no completada. Estado: {download_info["status"]}',
+                    'status': download_info['status'],
+                    'progress': download_info.get('progress', 0),
+                    'download_id': actual_download_id,
+                    'current_track': download_info.get('current_track'),
+                    'suggestions': {
+                        'processing': 'La descarga aún está en proceso, espera un momento',
+                        'error': 'La descarga falló, revisa los logs',
+                        'starting': 'La descarga acaba de empezar, espera un momento'
+                    }.get(download_info['status'], 'Estado desconocido'),
+                    'time_since_start': time.time() - download_info.get('started_at', time.time())
+                }), 400
+            
+            try:
+                file_path = download_info.get('file_path')
+                if not file_path or not os.path.exists(file_path):
+                    return jsonify({
+                        'error': 'Archivo ZIP no encontrado',
+                        'file_path': file_path,
+                        'file_exists': os.path.exists(file_path) if file_path else False,
+                        'download_id': actual_download_id,
+                        'download_info': {
+                            'status': download_info.get('status'),
+                            'completed_at': download_info.get('completed_at'),
+                            'file_size': download_info.get('file_size', 0)
+                        }
+                    }), 404
+                
+                # Verificar que es un ZIP válido antes de extraer
+                try:
+                    with zipfile.ZipFile(file_path, 'r') as test_zip:
+                        test_result = test_zip.testzip()  # Verificar integridad
+                        if test_result:
+                            return jsonify({
+                                'error': f'Archivo ZIP corrupto: {test_result}',
+                                'file_path': file_path
+                            }), 400
+                except zipfile.BadZipFile as e:
+                    return jsonify({
+                        'error': f'Archivo ZIP corrupto o inválido: {str(e)}',
+                        'file_path': file_path
+                    }), 400
+                except Exception as e:
+                    return jsonify({
+                        'error': f'Error verificando ZIP: {str(e)}',
+                        'file_path': file_path
+                    }), 400
+                
+                # Directorio de extracción
+                downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
+                
+                # Crear nombre del directorio de extracción más seguro
+                artist_name = download_info.get('artist_name', 'Unknown')
+                album_name = download_info.get('album_name', 'Unknown')
+                
+                # Limpiar nombres para sistema de archivos
+                safe_artist = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+                safe_album = "".join(c for c in album_name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+                
+                extract_dir_name = f"{safe_artist} - {safe_album}"
+                extract_path = os.path.join(downloads_dir, extract_dir_name)
+                
+                # Si el directorio ya existe, añadir sufijo numérico
+                counter = 1
+                original_extract_path = extract_path
+                while os.path.exists(extract_path):
+                    extract_path = f"{original_extract_path} ({counter})"
+                    counter += 1
+                
+                # Crear directorio si no existe
+                try:
+                    os.makedirs(extract_path, exist_ok=True)
+                    logger.info(f"Directorio de extracción creado: {extract_path}")
+                except Exception as e:
+                    return jsonify({
+                        'error': f'Error creando directorio de extracción: {str(e)}',
+                        'extract_path': extract_path
+                    }), 403
+                
+                # Extraer ZIP
+                extracted_files = []
+                extraction_errors = []
+                
+                try:
+                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                        for member in zip_ref.namelist():
+                            try:
+                                # Evitar problemas de seguridad con rutas
+                                if member.startswith('/') or '..' in member:
+                                    logger.warning(f"Saltando archivo con ruta insegura: {member}")
+                                    continue
+                                
+                                # Verificar que el nombre del archivo es válido
+                                if not member or member.endswith('/'):
+                                    continue  # Saltear directorios vacíos
+                                
+                                zip_ref.extract(member, extract_path)
+                                extracted_files.append(member)
+                                logger.debug(f"Extraído: {member}")
+                                
+                            except Exception as e:
+                                error_msg = f"Error extrayendo {member}: {str(e)}"
+                                logger.warning(error_msg)
+                                extraction_errors.append(error_msg)
+                                continue
+                
+                except Exception as e:
+                    return jsonify({
+                        'error': f'Error durante extracción: {str(e)}',
+                        'extract_path': extract_path
+                    }), 500
+                
+                if not extracted_files:
+                    # Limpiar directorio vacío
+                    try:
+                        os.rmdir(extract_path)
+                    except:
+                        pass
+                    return jsonify({
+                        'error': 'No se pudieron extraer archivos del ZIP',
+                        'extraction_errors': extraction_errors
+                    }), 400
+                
+                logger.info(f"Extraídos {len(extracted_files)} archivos a {extract_path}")
+                
+                # Verificar que se extrajeron archivos realmente
+                actual_files = []
+                total_size = 0
+                try:
+                    for root, dirs, files in os.walk(extract_path):
+                        for file in files:
+                            file_path_check = os.path.join(root, file)
+                            actual_files.append(file_path_check)
+                            try:
+                                total_size += os.path.getsize(file_path_check)
+                            except:
+                                pass
+                except Exception as e:
+                    logger.warning(f"Error verificando archivos extraídos: {e}")
+                
+                logger.info(f"Archivos verificados en disco: {len(actual_files)}")
+                
+                # Borrar ZIP inmediatamente
+                zip_deleted = False
+                zip_delete_error = None
+                try:
+                    os.remove(file_path)
+                    logger.info(f"ZIP borrado tras extracción: {file_path}")
+                    zip_deleted = True
+                except Exception as e:
+                    error_msg = f"Error borrando ZIP: {str(e)}"
+                    logger.warning(error_msg)
+                    zip_delete_error = error_msg
+                    zip_deleted = False
+                
+                # Cancelar borrado programado si existe
+                if actual_download_id in self.scheduled_deletions:
+                    del self.scheduled_deletions[actual_download_id]
+                    logger.info(f"Cancelado borrado automático programado para {actual_download_id}")
+                
+                # Actualizar estado de forma robusta
+                try:
+                    if actual_download_id in self.active_downloads:
+                        self.active_downloads[actual_download_id].update({
+                            'extracted': True,
+                            'extracted_at': time.time(),
+                            'extract_path': extract_path,
+                            'extracted_files': len(extracted_files),
+                            'actual_files_count': len(actual_files),
+                            'extraction_errors': extraction_errors,
+                            'zip_deleted': zip_deleted,
+                            'zip_deleted_at': time.time() if zip_deleted else None,
+                            'zip_delete_error': zip_delete_error,
+                            'total_extracted_size': total_size
+                        })
+                    else:
+                        logger.warning(f"Download ID {actual_download_id} no encontrado para actualizar estado de extracción")
+                except Exception as e:
+                    logger.error(f"Error actualizando estado de extracción: {e}")
+                
+                # Notificar extracción
+                try:
+                    self.telegram_notifier.notify_album_extracted(
+                        album_name,
+                        artist_name,
+                        extract_path,
+                        len(actual_files)
+                    )
+                except Exception as e:
+                    logger.warning(f"Error notificando extracción: {e}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Álbum extraído correctamente',
+                    'extract_path': extract_path,
+                    'extracted_files': len(extracted_files),
+                    'actual_files_count': len(actual_files),
+                    'total_size': total_size,
+                    'zip_deleted': zip_deleted,
+                    'zip_delete_error': zip_delete_error if not zip_deleted else None,
+                    'extraction_errors': extraction_errors if extraction_errors else None,
+                    'download_id': actual_download_id,
+                    'summary': {
+                        'artist': artist_name,
+                        'album': album_name,
+                        'success_files': len(extracted_files),
+                        'error_files': len(extraction_errors),
+                        'total_size_mb': round(total_size / (1024*1024), 2) if total_size > 0 else 0
+                    }
+                })
+                
+            except zipfile.BadZipFile:
+                return jsonify({
+                    'error': 'Archivo ZIP corrupto',
+                    'file_path': file_path
+                }), 400
+            except PermissionError:
+                return jsonify({
+                    'error': 'Sin permisos para extraer archivos',
+                    'extract_path': extract_path if 'extract_path' in locals() else 'N/A'
+                }), 403
+            except Exception as e:
+                logger.error(f"Error extrayendo álbum {actual_download_id}: {e}")
+                return jsonify({
+                    'error': f'Error interno: {str(e)}',
+                    'download_id': actual_download_id,
+                    'file_path': file_path if 'file_path' in locals() else 'N/A'
+                }), 500
+
+        @self.app.route('/api/download/cancel-auto-delete/<download_id>', methods=['POST'])
+        def api_cancel_auto_delete(download_id):
+            """Cancelar borrado automático programado"""
+            if download_id in self.scheduled_deletions:
+                deletion_info = self.scheduled_deletions[download_id]
+                del self.scheduled_deletions[download_id]
+                
+                # Actualizar info de descarga
+                if download_id in self.active_downloads:
+                    self.active_downloads[download_id]['auto_delete_scheduled'] = False
+                    self.active_downloads[download_id]['auto_delete_cancelled_at'] = time.time()
+                
+                logger.info(f"Cancelado borrado automático para {download_id}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Borrado automático cancelado',
+                    'was_scheduled_for': deletion_info.get('delete_at'),
+                    'time_remaining': deletion_info.get('delete_at', 0) - time.time()
+                })
+            else:
+                return jsonify({
+                    'error': 'No hay borrado programado para esta descarga',
+                    'download_id': download_id
+                }), 404
+
+        @self.app.route('/api/download/scheduled-deletions')
+        def api_list_scheduled_deletions():
+            """Listar borrados programados (debug)"""
+            deletions_info = {}
+            current_time = time.time()
+            
+            for download_id, deletion_info in self.scheduled_deletions.items():
+                deletions_info[download_id] = {
+                    'file_path': deletion_info['file_path'],
+                    'delete_at': deletion_info['delete_at'],
+                    'album_name': deletion_info.get('album_name'),
+                    'artist_name': deletion_info.get('artist_name'),
+                    'time_remaining': deletion_info['delete_at'] - current_time,
+                    'delay_seconds': deletion_info.get('delay_seconds'),
+                    'file_exists': os.path.exists(deletion_info['file_path'])
+                }
+            
+            return jsonify({
+                'scheduled_deletions': deletions_info,
+                'total': len(deletions_info),
+                'current_time': current_time
+            })
     
+
+        @self.app.route('/api/debug/download/<download_id>')
+        def api_debug_download(download_id):
+            """Debug detallado de una descarga específica"""
+            debug_info = {
+                'download_id': download_id,
+                'exists_in_active': download_id in self.active_downloads,
+                'exists_in_scheduled': download_id in self.scheduled_deletions,
+                'current_time': time.time()
+            }
+            
+            if download_id in self.active_downloads:
+                download_info = self.active_downloads[download_id].copy()
+                
+                # Añadir información de archivo
+                file_path = download_info.get('file_path')
+                if file_path:
+                    debug_info['file_info'] = {
+                        'path': file_path,
+                        'exists': os.path.exists(file_path),
+                        'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+                        'readable': os.access(file_path, os.R_OK) if os.path.exists(file_path) else False
+                    }
+                
+                debug_info['download_info'] = download_info
+            
+            if download_id in self.scheduled_deletions:
+                debug_info['scheduled_deletion'] = self.scheduled_deletions[download_id].copy()
+                debug_info['scheduled_deletion']['time_remaining'] = self.scheduled_deletions[download_id]['delete_at'] - time.time()
+            
+            return jsonify(debug_info)
+
+
+
+        @self.app.route('/api/download/status/<download_id>')
+        def api_download_status(download_id):
+            """Obtener estado de descarga con información detallada - VERSION MEJORADA"""
+            logger.debug(f"Consulta estado para: {download_id}")
+            logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
+            
+            # NUEVO: Búsqueda más flexible para manejar race conditions
+            actual_download_id = None
+            
+            # Búsqueda exacta primero
+            if download_id in self.active_downloads:
+                actual_download_id = download_id
+            else:
+                # Búsqueda por patrón (en caso de que haya alguna diferencia menor)
+                for active_id in self.active_downloads.keys():
+                    if download_id in active_id or active_id in download_id:
+                        actual_download_id = active_id
+                        logger.info(f"Encontrado match alternativo: {download_id} -> {actual_download_id}")
+                        break
+            
+            if not actual_download_id:
+                # MEJORADO: Respuesta más informativa
+                return jsonify({
+                    'error': 'Descarga no encontrada',
+                    'download_id': download_id,
+                    'active_downloads': list(self.active_downloads.keys()),
+                    'suggestion': 'La descarga puede haber terminado o expirado',
+                    'debug': {
+                        'requested_id': download_id,
+                        'available_ids': list(self.active_downloads.keys()),
+                        'total_active': len(self.active_downloads)
+                    }
+                }), 404
+            
+            # Usar el ID encontrado
+            status = self.active_downloads[actual_download_id].copy()
+            
+            # Añadir información de borrado automático si existe
+            if actual_download_id in self.scheduled_deletions:
+                deletion_info = self.scheduled_deletions[actual_download_id]
+                status['auto_delete_scheduled'] = True
+                status['auto_delete_at'] = deletion_info['delete_at']
+                status['auto_delete_time_remaining'] = max(0, deletion_info['delete_at'] - time.time())
+            else:
+                status['auto_delete_scheduled'] = False
+            
+            # NUEVO: Añadir validación de archivo para estados completados
+            if status.get('status') == 'completed':
+                file_path = status.get('file_path')
+                if file_path:
+                    status['file_exists'] = os.path.exists(file_path)
+                    if os.path.exists(file_path):
+                        status['file_size_current'] = os.path.getsize(file_path)
+                    else:
+                        logger.warning(f"Archivo completado no existe: {file_path}")
+                else:
+                    status['file_exists'] = False
+            
+            # Añadir información adicional para debug
+            status['debug_info'] = {
+                'requested_download_id': download_id,
+                'actual_download_id': actual_download_id,
+                'time_running': time.time() - status.get('started_at', time.time()),
+                'keys_in_status': list(status.keys())
+            }
+            
+            logger.debug(f"Enviando estado: {status.get('status')} - {status.get('progress')}%")
+            
+            return jsonify(status)
+
+        @self.app.route('/api/test/endpoints')
+        def api_test_endpoints():
+            """Verificar que endpoints están registrados"""
+            routes = []
+            for rule in self.app.url_map.iter_rules():
+                if '/api/' in rule.rule:
+                    routes.append({
+                        'endpoint': rule.endpoint,
+                        'methods': list(rule.methods),
+                        'rule': rule.rule
+                    })
+            return jsonify({'routes': sorted(routes, key=lambda x: x['rule'])})
+
+# Otras funciones
+
     def _download_album_worker(self, download_id, album, user_info):
-        """Worker para descargar álbum usando folder_path - VERSION CORREGIDA"""
+        """Worker para descargar álbum usando folder_path - VERSION CORREGIDA CON PROGRESO"""
         try:
+            # Verificar que la descarga existe al inicio
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} no encontrado al iniciar worker")
+                return
+                
             download_info = self.active_downloads[download_id]
             download_info['status'] = 'processing'
             download_info['progress'] = 5
+            download_info['current_track'] = 'Inicializando...'
             
             album_name = album.get('name', '')
             artist_name = album.get('artist_name', '')
@@ -628,6 +1173,14 @@ class APIEndpoints:
             music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
             album_directory = None
             
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante inicialización")
+                return
+                
+            self.active_downloads[download_id]['current_track'] = 'Localizando directorio del álbum...'
+            self.active_downloads[download_id]['progress'] = 10
+            
             if folder_path:
                 # Opción 1: Usar folder_path de la tabla albums
                 if folder_path.startswith('/'):
@@ -641,7 +1194,6 @@ class APIEndpoints:
                 album_directory = os.path.join(music_root, safe_artist, safe_album)
             
             logger.info(f"Directorio del álbum: {album_directory}")
-            download_info['progress'] = 10
             
             # Verificar que el directorio existe
             if not album_directory or not os.path.exists(album_directory):
@@ -650,7 +1202,13 @@ class APIEndpoints:
             if not os.path.isdir(album_directory):
                 raise Exception(f"La ruta no es un directorio: {album_directory}")
             
-            download_info['progress'] = 15
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante verificación de directorio")
+                return
+                
+            self.active_downloads[download_id]['current_track'] = 'Escaneando archivos de música...'
+            self.active_downloads[download_id]['progress'] = 15
             
             # Buscar archivos de música en el directorio
             music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
@@ -673,8 +1231,14 @@ class APIEndpoints:
             # Ordenar archivos por nombre para mantener orden de pistas
             music_files.sort(key=lambda x: x['name'])
             
-            download_info['total_tracks'] = len(music_files)
-            download_info['progress'] = 20
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante escaneo de archivos")
+                return
+                
+            self.active_downloads[download_id]['total_tracks'] = len(music_files)
+            self.active_downloads[download_id]['progress'] = 20
+            self.active_downloads[download_id]['current_track'] = f'Encontrados {len(music_files)} archivos'
             logger.info(f"Encontrados {len(music_files)} archivos de música")
             
             # Crear directorio de descargas
@@ -692,7 +1256,14 @@ class APIEndpoints:
             zip_path = os.path.join(downloads_dir, zip_filename)
             
             logger.info(f"Creando ZIP: {zip_path}")
-            download_info['progress'] = 25
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció antes de crear ZIP")
+                return
+                
+            self.active_downloads[download_id]['current_track'] = 'Iniciando creación del ZIP...'
+            self.active_downloads[download_id]['progress'] = 25
             
             successful_files = 0
             failed_files = []
@@ -700,11 +1271,23 @@ class APIEndpoints:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zipf:
                 for i, music_file in enumerate(music_files):
                     try:
-                        # Actualizar progreso (25% a 90%)
+                        # Verificar que la descarga sigue existiendo cada 5 archivos
+                        if i % 5 == 0 and download_id not in self.active_downloads:
+                            logger.error(f"Download ID {download_id} desapareció durante creación de ZIP en archivo {i}")
+                            # Limpiar ZIP parcial
+                            if os.path.exists(zip_path):
+                                os.remove(zip_path)
+                            return
+                        
+                        # Actualizar progreso (25% a 90%) - MÁS GRANULAR
                         progress = 25 + int((i / len(music_files)) * 65)
-                        download_info['progress'] = progress
-                        download_info['processed_tracks'] = i + 1
-                        download_info['current_track'] = music_file['name']
+                        self.active_downloads[download_id]['progress'] = progress
+                        self.active_downloads[download_id]['processed_tracks'] = i + 1
+                        self.active_downloads[download_id]['current_track'] = music_file['name']
+                        
+                        # LOG PARA DEBUG
+                        if i % 5 == 0 or i == len(music_files) - 1:  # Log cada 5 archivos
+                            logger.info(f"Procesando {i+1}/{len(music_files)}: {music_file['name']} ({progress}%)")
                         
                         file_path = music_file['path']
                         
@@ -723,7 +1306,16 @@ class APIEndpoints:
                         failed_files.append(error_msg)
                         continue
             
-            download_info['progress'] = 95
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció al finalizar ZIP")
+                # Limpiar ZIP si se creó
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                return
+                
+            self.active_downloads[download_id]['current_track'] = 'Finalizando ZIP...'
+            self.active_downloads[download_id]['progress'] = 95
             
             if successful_files == 0:
                 if os.path.exists(zip_path):
@@ -739,18 +1331,52 @@ class APIEndpoints:
             zip_size = os.path.getsize(zip_path)
             logger.info(f"ZIP completado: {zip_path} ({zip_size} bytes, {successful_files} archivos)")
             
-            # Actualizar estado final
-            download_info.update({
-                'status': 'completed',
-                'progress': 100,
-                'file_path': zip_path,
-                'zip_filename': zip_filename,
-                'successful_files': successful_files,
-                'failed_files': len(failed_files),
-                'failed_list': failed_files[:10],
-                'completed_at': time.time(),
-                'file_size': zip_size
-            })
+            # SECCIÓN MEJORADA: Actualizar estado final de forma más robusta
+            try:
+                # Asegurar que el download_id existe en active_downloads antes de actualizar
+                if download_id in self.active_downloads:
+                    self.active_downloads[download_id].update({
+                        'status': 'completed',
+                        'progress': 100,
+                        'current_track': None,
+                        'file_path': zip_path,
+                        'zip_filename': zip_filename,
+                        'successful_files': successful_files,
+                        'failed_files': len(failed_files),
+                        'failed_list': failed_files[:10],
+                        'completed_at': time.time(),
+                        'file_size': zip_size,
+                        'album_name': album_name,
+                        'artist_name': artist_name,
+                        'download_id': download_id,  # AÑADIDO: Asegurar que el ID esté presente
+                        'album_id': album_id  # AÑADIDO: Mantener referencia al álbum
+                    })
+                    logger.info(f"Estado actualizado correctamente para descarga {download_id}")
+                else:
+                    logger.error(f"Download ID {download_id} no encontrado en active_downloads al completar")
+                    # Recrear entrada si no existe
+                    self.active_downloads[download_id] = {
+                        'status': 'completed',
+                        'progress': 100,
+                        'current_track': None,
+                        'file_path': zip_path,
+                        'zip_filename': zip_filename,
+                        'successful_files': successful_files,
+                        'failed_files': len(failed_files),
+                        'failed_list': failed_files[:10],
+                        'completed_at': time.time(),
+                        'file_size': zip_size,
+                        'album_name': album_name,
+                        'artist_name': artist_name,
+                        'download_id': download_id,
+                        'album_id': album_id,
+                        'started_at': time.time() - 60  # Estimación
+                    }
+                    logger.info(f"Recreada entrada para descarga {download_id}")
+            except Exception as e:
+                logger.error(f"Error actualizando estado final de descarga {download_id}: {e}")
+            
+            logger.info(f"Descarga {download_id} completada exitosamente")
             
             # Notificar finalización
             try:
@@ -763,13 +1389,33 @@ class APIEndpoints:
         except Exception as e:
             logger.error(f"Error en descarga {download_id}: {e}")
             
-            # Actualizar estado de error
-            if download_id in self.active_downloads:
-                self.active_downloads[download_id].update({
-                    'status': 'error',
-                    'error': str(e),
-                    'progress': 0
-                })
+            # SECCIÓN MEJORADA: Actualizar estado de error de forma más robusta
+            try:
+                if download_id in self.active_downloads:
+                    self.active_downloads[download_id].update({
+                        'status': 'error',
+                        'error': str(e),
+                        'progress': 0,
+                        'current_track': None,
+                        'download_id': download_id,  # AÑADIDO: Asegurar que el ID esté presente
+                        'error_at': time.time()
+                    })
+                else:
+                    # Recrear entrada de error si no existe
+                    self.active_downloads[download_id] = {
+                        'status': 'error',
+                        'error': str(e),
+                        'progress': 0,
+                        'current_track': None,
+                        'download_id': download_id,
+                        'album_id': album.get('id'),
+                        'album_name': album.get('name', ''),
+                        'artist_name': album.get('artist_name', ''),
+                        'started_at': time.time(),
+                        'error_at': time.time()
+                    }
+            except Exception as update_error:
+                logger.error(f"Error actualizando estado de error para {download_id}: {update_error}")
             
             # Limpiar archivo parcial
             try:
@@ -787,31 +1433,6 @@ class APIEndpoints:
             except Exception as notify_error:
                 logger.warning(f"Error notificando error: {notify_error}")
 
-        # === ENDPOINT DE DESCARGA CORREGIDO ===
-
-
-        @self.app.route('/api/download/status/<download_id>')
-        def api_download_status(download_id):
-            """Obtener estado de descarga con información detallada"""
-            logger.debug(f"Consulta estado para: {download_id}")
-            logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
-            
-            if download_id not in self.active_downloads:
-                return jsonify({
-                    'error': 'Descarga no encontrada',
-                    'download_id': download_id,
-                    'active_downloads': list(self.active_downloads.keys())
-                }), 404
-            
-            status = self.active_downloads[download_id].copy()
-            
-            # Añadir información adicional para debug
-            status['debug_info'] = {
-                'download_id': download_id,
-                'time_running': time.time() - status.get('started_at', time.time())
-            }
-            
-            return jsonify(status)
 
 
     def _find_track_file_improved(self, track, music_root):

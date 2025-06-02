@@ -69,6 +69,55 @@ class TelegramNotifier:
             msg = f"📋 Descarga {status}:\n{artist_name} - {album_name}\n{message or ''}"
             return self.send_message(msg)
 
+    def notify_album_extracted(self, album_name, artist_name, extract_path, file_count):
+        """Notifica que un álbum ha sido extraído"""
+        if not self.enabled:
+            return
+        
+        try:
+            message = f"📁 *Álbum Extraído*\n\n"
+            message += f"🎵 *{artist_name}* - *{album_name}*\n"
+            message += f"📂 Ubicación: `{extract_path}`\n"
+            message += f"📊 Archivos: {file_count}\n"
+            message += f"🗑️ ZIP eliminado automáticamente"
+            
+            self._send_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error enviando notificación de extracción: {e}")
+
+    def notify_file_auto_deleted(self, album_name, artist_name, file_path):
+        """Notifica que un archivo ZIP ha sido borrado automáticamente"""
+        if not self.enabled:
+            return
+        
+        try:
+            message = f"🗑️ *Borrado Automático*\n\n"
+            message += f"🎵 *{artist_name}* - *{album_name}*\n"
+            message += f"📁 Archivo: `{os.path.basename(file_path)}`\n"
+            message += f"⏰ Borrado tras 180 segundos desde la descarga"
+            
+            self._send_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error enviando notificación de borrado automático: {e}")
+
+    def notify_extraction_error(self, album_name, artist_name, error_msg):
+        """Notifica error en extracción"""
+        if not self.enabled:
+            return
+        
+        try:
+            message = f"❌ *Error en Extracción*\n\n"
+            message += f"🎵 *{artist_name}* - *{album_name}*\n"
+            message += f"💥 Error: `{error_msg}`"
+            
+            self._send_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error enviando notificación de error de extracción: {e}")
+
+
 def create_notifier(config=None):
     """Crea una instancia del notificador"""
     if config is None:
