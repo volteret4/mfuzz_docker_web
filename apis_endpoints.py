@@ -11,6 +11,8 @@ from werkzeug.utils import secure_filename
 import threading
 import time
 
+from download_manager import DownloadManager
+
 logger = logging.getLogger(__name__)
 
 class APIEndpoints:
@@ -363,7 +365,7 @@ class APIEndpoints:
         # === DESCARGAS ===
         @self.app.route('/api/download/album/<int:album_id>', methods=['POST'])
         def api_download_album(album_id):
-            """Iniciar descarga de álbum usando folder_path"""
+            """Iniciar descarga de álbum - VERSIÓN DUAL (local/SSH)"""
             try:
                 logger.info(f"Solicitud de descarga para álbum ID: {album_id}")
                 
@@ -374,6 +376,7 @@ class APIEndpoints:
                 
                 logger.info(f"Álbum encontrado: {album['name']} - {album['artist_name']}")
                 logger.info(f"Folder path: {album.get('folder_path', 'No especificado')}")
+                logger.info(f"Modo de descarga: {self.download_manager.get_download_mode()}")
                 
                 # Información del usuario
                 user_info = {
@@ -394,18 +397,27 @@ class APIEndpoints:
                     'folder_path': album.get('folder_path', ''),
                     'progress': 0,
                     'started_at': time.time(),
-                    'user_ip': user_info['ip']
+                    'user_ip': user_info['ip'],
+                    'download_mode': self.download_manager.get_download_mode()
                 }
                 
                 logger.info(f"Descarga registrada con ID: {download_id}")
                 logger.info(f"Descargas activas: {list(self.active_downloads.keys())}")
                 
-                # Iniciar descarga en hilo separado
-                thread = threading.Thread(
-                    target=self._download_album_worker,
-                    args=(download_id, album, user_info),
-                    daemon=True
-                )
+                # Iniciar descarga en hilo separado según el modo
+                if self.download_manager.is_ssh_mode():
+                    thread = threading.Thread(
+                        target=self._download_album_worker_ssh,
+                        args=(download_id, album, user_info),
+                        daemon=True
+                    )
+                else:
+                    thread = threading.Thread(
+                        target=self._download_album_worker,
+                        args=(download_id, album, user_info),
+                        daemon=True
+                    )
+                
                 thread.start()
                 
                 return jsonify({
@@ -413,7 +425,8 @@ class APIEndpoints:
                     'status': 'started',
                     'message': 'Descarga iniciada',
                     'album_name': album.get('name'),
-                    'artist_name': album.get('artist_name')
+                    'artist_name': album.get('artist_name'),
+                    'download_mode': self.download_manager.get_download_mode()
                 })
                 
             except Exception as e:
@@ -1397,6 +1410,71 @@ class APIEndpoints:
                 logger.error(f"Error limpiando cache de imágenes: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/download/compress/<download_id>', methods=['POST'])
+        def api_compress_and_download(download_id):
+            """Comprimir álbum transferido por SSH y preparar descarga - NUEVO ENDPOINT"""
+            logger.info(f"Solicitud de compresión para ID: {download_id}")
+            
+            if download_id not in self.active_downloads:
+                return jsonify({
+                    'error': 'Descarga no encontrada',
+                    'download_id': download_id
+                }), 404
+            
+            download_info = self.active_downloads[download_id]
+            
+            # Verificar que la transferencia SSH esté completa
+            if download_info.get('status') != 'ssh_ready_download':
+                return jsonify({
+                    'error': f'Transferencia SSH no completada. Estado: {download_info.get("status")}',
+                    'status': download_info.get('status'),
+                    'download_id': download_id
+                }), 400
+            
+            # El archivo ya está listo, solo marcar como completado para descarga
+            try:
+                download_info.update({
+                    'status': 'completed',
+                    'ready_for_download': True,
+                    'compressed_at': time.time()
+                })
+                
+                logger.info(f"Álbum SSH {download_id} listo para descarga")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Álbum listo para descarga',
+                    'download_id': download_id,
+                    'file_path': download_info.get('file_path'),
+                    'zip_filename': download_info.get('zip_filename'),
+                    'file_size': download_info.get('file_size'),
+                    'album_name': download_info.get('album_name'),
+                    'artist_name': download_info.get('artist_name')
+                })
+                
+            except Exception as e:
+                logger.error(f"Error preparando descarga para {download_id}: {e}")
+                return jsonify({'error': str(e)}), 500
+
+
+        @self.app.route('/api/download/mode')
+        def api_get_download_mode():
+            """Obtener información del modo de descarga actual"""
+            try:
+                return jsonify({
+                    'mode': self.download_manager.get_download_mode(),
+                    'is_ssh_mode': self.download_manager.is_ssh_mode(),
+                    'ssh_config': {
+                        'enabled': self.download_manager.ssh_enabled,
+                        'host': self.download_manager.ssh_host,
+                        'remote_path': self.download_manager.remote_music_path
+                    } if self.download_manager.is_ssh_mode() else {}
+                })
+            except Exception as e:
+                logger.error(f"Error obteniendo modo de descarga: {e}")
+                return jsonify({'error': str(e)}), 500
+
+
 # Otras funciones
 
     def _download_album_worker(self, download_id, album, user_info):
@@ -1853,3 +1931,198 @@ class APIEndpoints:
         except Exception as e:
             logger.warning(f"Error en búsqueda por patrón: {e}")
             return None
+
+
+    def _download_album_worker_ssh(self, download_id, album, user_info):
+        """Worker para descargar álbum en modo SSH - NUEVA FUNCIONALIDAD"""
+        try:
+            # Verificar que la descarga existe al inicio
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} no encontrado al iniciar worker SSH")
+                return
+                
+            download_info = self.active_downloads[download_id]
+            download_info['status'] = 'ssh_preparing'
+            download_info['progress'] = 5
+            download_info['current_track'] = 'Preparando transferencia SSH...'
+            
+            album_name = album.get('name', '')
+            artist_name = album.get('artist_name', '')
+            album_id = album.get('id')
+            
+            logger.info(f"Iniciando descarga SSH: {artist_name} - {album_name} (ID: {album_id})")
+            
+            # Notificar inicio
+            try:
+                self.telegram_notifier.notify_download_started(
+                    album_name, artist_name, user_info.get('ip', ''), 'ssh'
+                )
+            except Exception as e:
+                logger.warning(f"Error notificando inicio SSH: {e}")
+            
+            # Obtener ruta de origen del álbum
+            source_path = self.download_manager.get_album_source_path(album)
+            if not source_path or not os.path.exists(source_path):
+                raise Exception(f"Directorio del álbum no encontrado: {source_path}")
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante preparación SSH")
+                return
+            
+            # FASE 1: Transferencia SSH con rsync
+            self.active_downloads[download_id]['status'] = 'ssh_transferring'
+            self.active_downloads[download_id]['progress'] = 10
+            self.active_downloads[download_id]['current_track'] = 'Transfiriendo archivos con rsync...'
+            
+            def progress_callback(line):
+                """Callback para monitorear progreso de rsync"""
+                if download_id in self.active_downloads:
+                    # Interpretar salida de rsync para calcular progreso
+                    if 'to-chk=' in line:
+                        try:
+                            # Extraer progreso de la línea de rsync
+                            parts = line.split('to-chk=')[1].split(')')
+                            remaining, total = map(int, parts[0].split('/'))
+                            if total > 0:
+                                progress = 10 + int(((total - remaining) / total) * 50)  # 10% a 60%
+                                self.active_downloads[download_id]['progress'] = min(progress, 60)
+                        except:
+                            pass
+                    # Mostrar archivo actual
+                    if line and not line.startswith('sending') and '/' in line:
+                        filename = os.path.basename(line.strip())
+                        if filename:
+                            self.active_downloads[download_id]['current_track'] = f'Transfiriendo: {filename}'
+            
+            # Ejecutar rsync
+            rsync_result = self.download_manager.execute_rsync(
+                source_path, album, download_id, progress_callback
+            )
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante rsync")
+                return
+            
+            if not rsync_result['success']:
+                raise Exception(f"Error en rsync: {rsync_result['error']}")
+            
+            remote_path = rsync_result['remote_path']
+            logger.info(f"Rsync completado para {download_id}, archivos en: {remote_path}")
+            
+            # FASE 2: Compresión remota y descarga
+            self.active_downloads[download_id]['status'] = 'ssh_compressing'
+            self.active_downloads[download_id]['progress'] = 65
+            self.active_downloads[download_id]['current_track'] = 'Comprimiendo álbum en servidor remoto...'
+            self.active_downloads[download_id]['remote_path'] = remote_path
+            
+            # Comprimir y transferir
+            compression_result = self.download_manager.compress_remote_album(
+                remote_path, album, download_id
+            )
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante compresión")
+                return
+            
+            if not compression_result['success']:
+                # Limpiar archivos remotos en caso de error
+                try:
+                    self.download_manager.cleanup_remote_files(remote_path)
+                except:
+                    pass
+                raise Exception(f"Error en compresión remota: {compression_result['error']}")
+            
+            # FASE 3: Finalización
+            self.active_downloads[download_id]['status'] = 'ssh_cleaning'
+            self.active_downloads[download_id]['progress'] = 90
+            self.active_downloads[download_id]['current_track'] = 'Limpiando archivos temporales...'
+            
+            # Limpiar archivos remotos
+            cleanup_success = self.download_manager.cleanup_remote_files(remote_path)
+            if not cleanup_success:
+                logger.warning(f"No se pudieron limpiar archivos remotos para {download_id}")
+            
+            # Verificar que la descarga sigue existiendo
+            if download_id not in self.active_downloads:
+                logger.error(f"Download ID {download_id} desapareció durante limpieza")
+                return
+            
+            # Actualizar estado final
+            self.active_downloads[download_id].update({
+                'status': 'ssh_ready_download',  # NUEVO ESTADO: listo para descargar
+                'progress': 100,
+                'current_track': None,
+                'file_path': compression_result['file_path'],
+                'zip_filename': compression_result['zip_filename'],
+                'file_size': compression_result['file_size'],
+                'completed_at': time.time(),
+                'album_name': album_name,
+                'artist_name': artist_name,
+                'download_id': download_id,
+                'album_id': album_id,
+                'remote_cleanup': cleanup_success,
+                'ssh_transfer_complete': True
+            })
+            
+            logger.info(f"Descarga SSH {download_id} completada - Lista para descarga")
+            
+            # Notificar finalización de transferencia SSH
+            try:
+                self.telegram_notifier.notify_download_completed(
+                    album_name, artist_name, rsync_result['files_copied'], 
+                    compression_result['file_path'], 'ssh'
+                )
+            except Exception as e:
+                logger.warning(f"Error notificando finalización SSH: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error en descarga SSH {download_id}: {e}")
+            
+            # Actualizar estado de error
+            try:
+                if download_id in self.active_downloads:
+                    self.active_downloads[download_id].update({
+                        'status': 'error',
+                        'error': str(e),
+                        'progress': 0,
+                        'current_track': None,
+                        'download_id': download_id,
+                        'error_at': time.time(),
+                        'ssh_error': True
+                    })
+                else:
+                    # Recrear entrada de error si no existe
+                    self.active_downloads[download_id] = {
+                        'status': 'error',
+                        'error': str(e),
+                        'progress': 0,
+                        'current_track': None,
+                        'download_id': download_id,
+                        'album_id': album.get('id'),
+                        'album_name': album.get('name', ''),
+                        'artist_name': album.get('artist_name', ''),
+                        'started_at': time.time(),
+                        'error_at': time.time(),
+                        'ssh_error': True,
+                        'download_mode': 'ssh'
+                    }
+            except Exception as update_error:
+                logger.error(f"Error actualizando estado de error SSH para {download_id}: {update_error}")
+            
+            # Intentar limpiar archivos remotos si existen
+            try:
+                if 'remote_path' in locals():
+                    self.download_manager.cleanup_remote_files(remote_path)
+            except:
+                pass
+            
+            # Notificar error
+            try:
+                self.telegram_notifier.notify_download_error(
+                    album.get('name', ''), album.get('artist_name', ''), str(e)
+                )
+            except Exception as notify_error:
+                logger.warning(f"Error notificando error SSH: {notify_error}")

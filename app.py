@@ -142,10 +142,25 @@ class MusicWebExplorer:
             try:
                 # Verificar componentes críticos
                 db_status = self.db_manager.test_connection()
+                
+                # Información del modo de descarga (si API endpoints está disponible)
+                download_info = {}
+                try:
+                    if hasattr(self, 'api_endpoints') and hasattr(self.api_endpoints, 'download_manager'):
+                        download_manager = self.api_endpoints.download_manager
+                        download_info = {
+                            'mode': download_manager.get_download_mode(),
+                            'ssh_enabled': download_manager.is_ssh_mode(),
+                            'ssh_host': download_manager.ssh_host if download_manager.is_ssh_mode() else None
+                        }
+                except:
+                    download_info = {'mode': 'unknown', 'error': 'DownloadManager not available'}
+                
                 return jsonify({
                     'status': 'healthy',
                     'database': 'connected' if db_status else 'disconnected',
-                    'version': self.config.get('app', {}).get('version', '1.0.0')
+                    'version': self.config.get('app', {}).get('version', '1.0.0'),
+                    'download_manager': download_info
                 })
             except Exception as e:
                 logger.error(f"Error en healthcheck: {e}")

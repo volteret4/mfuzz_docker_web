@@ -55,3 +55,20 @@ ui:
   items_per_page: 50
   search_min_chars: 2
   history_max_items: 100
+
+downloads:
+  # Modo: 'local' o 'ssh'
+  mode: 'ssh'  # Cambiar a 'ssh' para usar rsync
+  
+  # Configuración para modo SSH
+  ssh:
+    enabled: false
+    host: 'pepe@pepe-cono'  # Usuario@host de Tailscale
+    remote_music_path: '/mnt/NFS/moode/moode'  # Ruta donde copiar en el servidor remoto
+    rsync_options: ['-avz', '--progress']  # Opciones adicionales para rsync
+    #ssh_key_path: '/home/user/.ssh/id_rsa'  # Ruta a la clave SSH (opcional)
+    timeout: 300  # Timeout en segundos para rsync
+  
+  # Configuración general
+  temp_cleanup: true  # Limpiar archivos temporales después de descargar
+  auto_delete_delay: 180
