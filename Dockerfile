@@ -22,19 +22,20 @@ RUN groupadd -g 1001 music 2>/dev/null || true && \
     useradd -u ${USER_UID} -g ${USER_GID} -G music -m -s /bin/bash ${USER}
 
 # Crear directorios base
-RUN mkdir -p /app /app/data /app/logs /app/static /app/templates /app/images \
+RUN mkdir -p /app /app/data /app/logs /app/static/js /app/templates /app/images \
     && chown -R ${USER_UID}:${USER_GID} /app
 
 # Copiar y instalar requirements primero (para cache de Docker)
-COPY requirements.txt /app/
+COPY docker/requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copiar archivos de configuración
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/nginx.conf /etc/nginx/sites-available/default
-COPY app.py db_manager.py download_manager.py artist_analyzer.py apis_endpoints.py img_manager.py stats_manager.py album_analysis_endpoint.py template_routes.py telegram_notifier.py config.yml /app/
-COPY templates/index.html templates/sistema.html templates/album_analysis.html /app/
+COPY scripts/* /app/
+COPY templates/* /app/
+COPY static/js/* /app/static/js/
 
 
 
@@ -64,7 +65,8 @@ RUN chmod +x /entrypoint.sh && \
 # Crear directorio de templates y copiar archivos HTML
 RUN mkdir -p /app/templates && \
     if [ -f "/app/index.html" ]; then cp /app/index.html /app/templates/; fi && \
-    if [ -f "/app/sistema.html" ]; then cp /app/sistema.html /app/templates/; fi
+    if [ -f "/app/sistema.html" ]; then cp /app/sistema.html /app/templates/; fi && \
+    if [ -f "/app/album_analysis.html" ]; then cp /app/album_analysis.html /app/templates/; fi
 
 WORKDIR /app
 

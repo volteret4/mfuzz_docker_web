@@ -20,7 +20,7 @@ services:
       - /home/huan/.ssh:/tmp/host_ssh:ro
       
       # Configuración personalizada (opcional)
-      - /home/huan/gits/pollo/mfuzz_docker_web/config.yml:/app/config.yml:ro
+      - /home/huan/gits/pollo/mfuzz_docker_web/scripts/config.yml:/app/config.yml:ro
     
       - /mnt/NFS/moode/moode:/mnt/NFS/moode/moode:ro
 

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Music Web Explorer</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="/static/js/global-functions.js"></script>
     <style>
         * {
             margin: 0;
@@ -679,6 +680,9 @@
             <button class="tab" data-tab="statistics">
                 <i class="fas fa-chart-bar"></i> Estadísticas
             </button>
+            <button class="tab" data-tab="album-analysis">
+                <i class="fas fa-compact-disc"></i> Análisis Álbumes
+            </button>
         </div>
 
         <div class="content-area">
@@ -692,6 +696,7 @@
     </div>
 
     <script>
+        // === CLASE PRINCIPAL ===
         class MusicWebExplorer {
             constructor() {
                 this.currentTab = 'search';
@@ -718,7 +723,7 @@
 
                 // Navegación con teclas
                 document.addEventListener('keydown', (e) => {
-                    if (e.key === 'Escape') this.goBack();
+                    if (e.key === 'Escape') window.goBack();
                     if (e.ctrlKey && e.key === 'f') {
                         e.preventDefault();
                         document.getElementById('searchBox').focus();
@@ -730,21 +735,23 @@
                 this.showContent('search');
             }
 
+        // === BÚSQUEDA PRINCIPAL ===
+
             async performSearch() {
                 const query = document.getElementById('searchBox').value.trim();
                 if (query.length < 2) {
-                    this.showError('La búsqueda debe tener al menos 2 caracteres');
+                    window.showError('La búsqueda debe tener al menos 2 caracteres');
                     return;
                 }
 
                 this.showLoading('Buscando...');
-                
+
                 try {
                     const response = await fetch(`/api/search/global?q=${encodeURIComponent(query)}`);
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError(data.error);
+                        window.showError(data.error);
                         return;
                     }
                     
@@ -753,7 +760,7 @@
                     
                 } catch (error) {
                     console.error('Error en búsqueda:', error);
-                    this.showError('Error al realizar la búsqueda');
+                    window.showError('Error al realizar la búsqueda');
                 }
             }
 
@@ -810,6 +817,9 @@
                         break;
                 }
             }
+
+        
+            // === RENDERIZADO DE RESULTADOS ===
 
             renderArtistsGrid(artists) {
                 if (!artists.length) {
@@ -876,7 +886,7 @@
                                     <div class="track-title">${track.title}</div>
                                     <div class="track-duration">
                                         ${track.artist} - ${track.album}
-                                        ${track.duration ? this.formatDuration(track.duration) : ''}
+                                        ${track.duration ? window.formatDuration(track.duration) : ''}
                                     </div>
                                 </div>
                                 <div class="track-actions">
@@ -890,8 +900,10 @@
                 `;
             }
 
+        // === NAVEGACIÓN DE CONTENIDO ===
+
             async showArtist(artistId) {
-                this.pushHistory({ type: 'artist', id: artistId });
+                window.pushHistory({ type: 'artist', id: artistId });
                 this.showLoading('Cargando artista...');
                 
                 try {
@@ -904,7 +916,7 @@
                     const albumsData = await albumsResponse.json();
                     
                     if (artistData.error || albumsData.error) {
-                        this.showError('Error cargando información del artista');
+                        window.showError('Error cargando información del artista');
                         return;
                     }
                     
@@ -912,7 +924,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando artista:', error);
-                    this.showError('Error cargando información del artista');
+                    window.showError('Error cargando información del artista');
                 }
             }
 
@@ -950,7 +962,7 @@
             }
 
             async showAlbum(albumId) {
-                this.pushHistory({ type: 'album', id: albumId });
+                window.pushHistory({ type: 'album', id: albumId });
                 this.showLoading('Cargando álbum...');
                 
                 try {
@@ -963,7 +975,7 @@
                     const tracksData = await tracksResponse.json();
                     
                     if (albumData.error || tracksData.error) {
-                        this.showError('Error cargando información del álbum');
+                        window.showError('Error cargando información del álbum');
                         return;
                     }
                     
@@ -971,7 +983,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando álbum:', error);
-                    this.showError('Error cargando información del álbum');
+                    window.showError('Error cargando información del álbum');
                 }
             }
 
@@ -1020,9 +1032,13 @@
                     .catch(e => console.warn('No se pudo obtener modo de descarga:', e));
             }
 
+
+
+        // === DESCARGAS ===
+
             async downloadAlbum(albumId) {
                 try {
-                    // Primero obtener información del álbum para mostrar en el progreso
+                    // Obtener información del álbum para mostrar en el progreso
                     let albumInfo = null;
                     try {
                         const albumResponse = await fetch(`/api/albums/${albumId}`);
@@ -1059,12 +1075,12 @@
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError(data.error);
+                        window.showError(data.error);
                         return;
                     }
                     
                     if (!data.download_id) {
-                        this.showError('No se recibió ID de descarga del servidor');
+                        window.showError('No se recibió ID de descarga del servidor');
                         return;
                     }
                     
@@ -1080,7 +1096,7 @@
                     
                 } catch (error) {
                     console.error('Error iniciando descarga:', error);
-                    this.showError(`Error iniciando descarga: ${error.message}`);
+                    window.showError(`Error iniciando descarga: ${error.message}`);
                 }
             }
 
@@ -1099,7 +1115,7 @@
 
             async downloadSSHFile(downloadId) {
                 try {
-                    this.showToast('Preparando descarga SSH...', 'info');
+                    window.showToast('Preparando descarga SSH...', 'info');
                     
                     // Marcar como completado para descarga
                     const compressResponse = await fetch(`/api/download/compress/${downloadId}`, {
@@ -1126,7 +1142,7 @@
                     document.body.removeChild(link);
                     
                     // Mostrar mensaje sobre borrado automático
-                    this.showToast('Descarga SSH iniciada. El archivo se borrará automáticamente en 3 minutos.', 'warning', 5000);
+                    window.showToast('Descarga SSH iniciada. El archivo se borrará automáticamente en 3 minutos.', 'warning', 5000);
                     
                     // Actualizar estado para mostrar que se descargó
                     const statusElement = document.getElementById(`download-status-${downloadId}`);
@@ -1136,7 +1152,7 @@
                                 <h6><i class="fas fa-check-circle"></i> Descarga SSH completada</h6>
                                 <p><strong>${compressResult.album_name || 'Álbum'}</strong> - ${compressResult.artist_name || 'Artista'}</p>
                                 <p>Archivo descargado: ${compressResult.zip_filename}</p>
-                                <p><strong>Tamaño:</strong> ${this.formatBytes(compressResult.file_size || 0)}</p>
+                                <p><strong>Tamaño:</strong> ${window.formatBytes(compressResult.file_size || 0)}</p>
                                 <div class="mt-2">
                                     <small class="text-warning">⚠️ El archivo se borrará automáticamente del servidor en 3 minutos</small>
                                 </div>
@@ -1146,7 +1162,7 @@
                     
                 } catch (error) {
                     console.error('Error descargando archivo SSH:', error);
-                    this.showToast(`Error en descarga SSH: ${error.message}`, 'error');
+                    window.showToast(`Error en descarga SSH: ${error.message}`, 'error');
                 }
             }
 
@@ -1176,7 +1192,7 @@
                             <h6><i class="fas fa-server"></i> Transferencia SSH completada</h6>
                             <p><strong>${status.album_name || 'Álbum'}</strong> - ${status.artist_name || 'Artista'}</p>
                             <p>Archivos transferidos al servidor remoto</p>
-                            <p><strong>Archivo comprimido:</strong> ${this.formatBytes(status.file_size || 0)}</p>
+                            <p><strong>Archivo comprimido:</strong> ${window.formatBytes(status.file_size || 0)}</p>
                             
                             <div class="mt-3 d-flex gap-2 flex-wrap">
                                 <button class="btn btn-success" onclick="app.downloadSSHFile('${downloadId}')">
@@ -1287,7 +1303,7 @@
                             
                             if (attempts >= maxAttempts && !['ssh_ready_download', 'completed', 'error'].includes(status.status)) {
                                 console.warn('⏰ Timeout monitoreando descarga SSH');
-                                this.showToast('Timeout monitoreando descarga SSH. Verifica manualmente el estado.', 'warning');
+                                window.showToast('Timeout monitoreando descarga SSH. Verifica manualmente el estado.', 'warning');
                             } else {
                                 console.log(`🏁 Monitoreo SSH terminado. Estado final: ${status.status}`);
                             }
@@ -1387,7 +1403,7 @@
                         if (status.status === 'completed' || status.status === 'error' || attempts >= maxAttempts) {
                             if (attempts >= maxAttempts && status.status !== 'completed') {
                                 console.warn('⏰ Timeout monitoreando descarga');
-                                this.showToast('Timeout monitoreando descarga. Verifica manualmente el estado.', 'warning');
+                                window.showToast('Timeout monitoreando descarga. Verifica manualmente el estado.', 'warning');
                             } else {
                                 console.log(`🏁 Monitoreo terminado. Estado final: ${status.status}`);
                             }
@@ -1436,13 +1452,71 @@
                 checkProgress();
             }
 
+
+        // === OTRAS FUNCIONES ESPECÍFICAS ===
+
+            async showTrack(trackId) {
+                window.pushHistory({ type: 'track', id: trackId });
+                this.showLoading('Cargando información de la canción...');
+                
+                try {
+                    const response = await fetch(`/api/songs/${trackId}`);
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        window.showError('Error cargando información de la canción');
+                        return;
+                    }
+                    
+                    this.renderTrackPage(data.track);
+                    
+                } catch (error) {
+                    console.error('Error cargando canción:', error);
+                    window.showError('Error cargando información de la canción');
+                }
+            }
+
+            renderTrackPage(track) {
+                const content = `
+                    <button class="back-btn" onclick="app.goBack()">
+                        <i class="fas fa-arrow-left"></i> Volver
+                    </button>
+                    
+                    <div class="artist-info">
+                        <div class="artist-image">
+                            <img src="/api/images/track/${track.id}" 
+                                alt="${track.title}" 
+                                onerror="this.src='/static/images/track_default.jpg'">
+                        </div>
+                        <div class="artist-details">
+                            <h2>${track.title}</h2>
+                            <p class="card-subtitle">${track.artist} - ${track.album}</p>
+                            ${track.duration ? `<p><strong>Duración:</strong> ${window.formatDuration(track.duration)}</p>` : ''}
+                            ${track.track_number ? `<p><strong>Track:</strong> ${track.track_number}</p>` : ''}
+                            ${track.year ? `<p><strong>Año:</strong> ${track.year}</p>` : ''}
+                            
+                            <div class="artist-links">
+                                <button class="btn" onclick="app.showLyrics(${track.id})">
+                                    <i class="fas fa-quote-right"></i> Ver Letras
+                                </button>
+                                ${track.spotify_url ? `<a href="${track.spotify_url}" target="_blank" class="link-btn"><i class="fab fa-spotify"></i> Spotify</a>` : ''}
+                                ${track.youtube_url ? `<a href="${track.youtube_url}" target="_blank" class="link-btn"><i class="fab fa-youtube"></i> YouTube</a>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                this.showContent('track', content);
+            }
+
+
             async showLyrics(songId) {
                 try {
                     const response = await fetch(`/api/songs/${songId}/lyrics`);
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError('No se encontraron letras para esta canción');
+                        window.showError('No se encontraron letras para esta canción');
                         return;
                     }
                     
@@ -1475,14 +1549,14 @@
                     
                 } catch (error) {
                     console.error('Error cargando letras:', error);
-                    this.showError('Error cargando letras');
+                    window.showError('Error cargando letras');
                 }
             }
 
             // Funciones de extracción y descarga
             async extractAlbum(downloadId) {
                 try {
-                    this.showToast('Iniciando extracción...', 'info');
+                    window.showToast('Iniciando extracción...', 'info');
                     
                     const response = await fetch(`/api/download/extract/${downloadId}`, {
                         method: 'POST'
@@ -1491,7 +1565,7 @@
                     const result = await response.json();
                     
                     if (result.success) {
-                        this.showToast(`Álbum extraído correctamente en: ${result.extract_path}`, 'success');
+                        window.showToast(`Álbum extraído correctamente en: ${result.extract_path}`, 'success');
                         
                         // Actualizar la interfaz para mostrar que fue extraído
                         const statusElement = document.getElementById(`download-status-${downloadId}`);
@@ -1506,11 +1580,11 @@
                             `;
                         }
                     } else {
-                        this.showToast(`Error extrayendo álbum: ${result.error}`, 'error');
+                        window.showToast(`Error extrayendo álbum: ${result.error}`, 'error');
                     }
                 } catch (error) {
                     console.error('Error extrayendo álbum:', error);
-                    this.showToast('Error de conexión al extraer álbum', 'error');
+                    window.showToast('Error de conexión al extraer álbum', 'error');
                 }
             }
 
@@ -1523,21 +1597,21 @@
                     const result = await response.json();
                     
                     if (result.success) {
-                        this.showToast('Borrado automático cancelado', 'success');
+                        window.showToast('Borrado automático cancelado', 'success');
                         // Refrescar el estado para actualizar la interfaz
                         this.checkDownloadStatus(downloadId);
                     } else {
-                        this.showToast(`Error: ${result.error}`, 'error');
+                        window.showToast(`Error: ${result.error}`, 'error');
                     }
                 } catch (error) {
                     console.error('Error cancelando borrado automático:', error);
-                    this.showToast('Error de conexión', 'error');
+                    window.showToast('Error de conexión', 'error');
                 }
             }
 
             async downloadFile(downloadId) {
                 try {
-                    this.showToast('Iniciando descarga...', 'info');
+                    window.showToast('Iniciando descarga...', 'info');
                     
                     // Crear enlace temporal para descarga
                     const link = document.createElement('a');
@@ -1548,7 +1622,7 @@
                     document.body.removeChild(link);
                     
                     // Mostrar mensaje sobre borrado automático
-                    this.showToast('Descarga iniciada. El archivo se borrará automáticamente en 3 minutos.', 'warning', 5000);
+                    window.showToast('Descarga iniciada. El archivo se borrará automáticamente en 3 minutos.', 'warning', 5000);
                     
                     // Refrescar estado para mostrar info de borrado programado
                     setTimeout(() => {
@@ -1557,10 +1631,9 @@
                     
                 } catch (error) {
                     console.error('Error descargando archivo:', error);
-                    this.showToast('Error iniciando descarga', 'error');
+                    window.showToast('Error iniciando descarga', 'error');
                 }
             }
-
             async checkDownloadStatus(downloadId) {
                 try {
                     console.log(`🔍 Verificación manual de estado para: ${downloadId}`);
@@ -1570,7 +1643,7 @@
                         console.error(`❌ Error en verificación manual: ${response.status} ${response.statusText}`);
                         const errorText = await response.text();
                         console.error('Texto del error:', errorText);
-                        this.showToast(`Error verificando estado: ${response.status}`, 'error');
+                        window.showToast(`Error verificando estado: ${response.status}`, 'error');
                         return;
                     }
                     
@@ -1580,7 +1653,7 @@
                     
                 } catch (error) {
                     console.error('💥 Error verificando estado de descarga:', error);
-                    this.showToast('Error de conexión al verificar estado', 'error');
+                    window.showToast('Error de conexión al verificar estado', 'error');
                 }
             }
 
@@ -1618,7 +1691,7 @@
                         <div class="alert alert-success">
                             <h6><i class="fas fa-check-circle"></i> Descarga completada</h6>
                             <p><strong>${status.album_name || 'Álbum'}</strong> - ${status.artist_name || 'Artista'}</p>
-                            <p>Archivos: ${status.successful_files || 0} | Tamaño: ${this.formatBytes(status.file_size || 0)}</p>
+                            <p>Archivos: ${status.successful_files || 0} | Tamaño: ${window.formatBytes(status.file_size || 0)}</p>
                             ${autoDeleteInfo}
                             
                             <div class="mt-3 d-flex gap-2 flex-wrap">
@@ -1656,7 +1729,7 @@
                     // En progreso - INTERFAZ MEJORADA
                     const progressPercent = Math.round(status.progress || 0);
                     const currentTrack = status.current_track || 'Procesando...';
-                    const statusText = this.getStatusText(status.status);
+                    const statusText = window.getStatusText(status.status);
                     
                     // Actualizar solo el contenido del estado si existe el contenedor
                     const statusContentElement = document.getElementById(`downloadStatus-${downloadId}`);
@@ -1682,62 +1755,9 @@
             }
 
             // Funciones auxiliares
-            formatBytes(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
 
-            getStatusText(status) {
-                const statusTexts = {
-                    'starting': 'Iniciando descarga...',
-                    'processing': 'Procesando archivos...',
-                    'completed': 'Completado',
-                    'error': 'Error'
-                };
-                return statusTexts[status] || status;
-            }
 
-            showToast(message, type = 'info', duration = 3000) {
-                const toast = document.createElement('div');
-                toast.style.cssText = `
-                    position: fixed; top: 20px; right: 20px; z-index: 1050;
-                    padding: 15px 20px; border-radius: 10px; color: white;
-                    font-weight: bold; max-width: 300px; word-wrap: break-word;
-                    transform: translateX(100%); transition: transform 0.3s ease;
-                `;
-                
-                const colors = {
-                    'success': 'rgba(40, 167, 69, 0.9)',
-                    'error': 'rgba(220, 53, 69, 0.9)',
-                    'warning': 'rgba(255, 193, 7, 0.9)',
-                    'info': 'rgba(23, 162, 184, 0.9)'
-                };
-                
-                toast.style.background = colors[type] || colors['info'];
-                toast.textContent = message;
-                
-                document.body.appendChild(toast);
-                
-                // Animar entrada
-                setTimeout(() => {
-                    toast.style.transform = 'translateX(0)';
-                }, 100);
-                
-                // Remover después del tiempo especificado
-                setTimeout(() => {
-                    toast.style.transform = 'translateX(100%)';
-                    setTimeout(() => {
-                        if (toast.parentNode) {
-                            toast.parentNode.removeChild(toast);
-                        }
-                    }, 300);
-                }, duration);
-            }
+
 
             switchTab(tabName) {
                 document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -1796,7 +1816,7 @@
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError(data.error);
+                        window.showError(data.error);
                         return;
                     }
                     
@@ -1831,7 +1851,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando búsquedas recientes:', error);
-                    this.showError('Error cargando búsquedas recientes');
+                    window.showError('Error cargando búsquedas recientes');
                 }
             }
 
@@ -1843,7 +1863,7 @@
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError(data.error);
+                        window.showError(data.error);
                         return;
                     }
                     
@@ -1856,7 +1876,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando artistas populares:', error);
-                    this.showError('Error cargando artistas populares');
+                    window.showError('Error cargando artistas populares');
                 }
             }
 
@@ -1888,7 +1908,7 @@
                     const data = await response.json();
                     
                     if (data.error) {
-                        this.showError(data.error);
+                        window.showError(data.error);
                         return;
                     }
                     
@@ -1929,7 +1949,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando configuración:', error);
-                    this.showError('Error cargando configuración');
+                    window.showError('Error cargando configuración');
                 }
             }
 
@@ -1945,57 +1965,27 @@
                 document.querySelector('[data-tab="search"]').classList.add('active');
             }
 
-            showLoading(message = 'Cargando...') {
-                const content = `
-                    <div class="loading">
-                        <i class="fas fa-spinner"></i>
-                        <p>${message}</p>
-                    </div>
-                `;
-                document.getElementById('content').innerHTML = content;
-            }
-
-            showError(message) {
-                const content = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <p>${message}</p>
-                    </div>
-                `;
-                document.getElementById('content').innerHTML = content;
-            }
-
-            pushHistory(item) {
-                this.history.push(this.currentPage);
-                this.currentPage = item;
-            }
-
-            goBack() {
-                if (this.history.length > 0) {
-                    const previousPage = this.history.pop();
-                    this.currentPage = previousPage;
-                    
-                    if (previousPage === 'home') {
-                        this.showContent(this.currentTab);
-                    } else if (previousPage.type === 'artist') {
-                        this.showArtist(previousPage.id);
-                    } else if (previousPage.type === 'album') {
-                        this.showAlbum(previousPage.id);
-                    }
+            showLoading(message = 'Cargando...', containerId = 'content') {
+                const container = document.getElementById(containerId);
+                if (container) {
+                    container.innerHTML = `
+                        <div class="loading">
+                            <i class="fas fa-spinner"></i>
+                            <p>${message}</p>
+                        </div>
+                    `;
                 } else {
-                    this.showContent(this.currentTab);
+                    // Fallback a función global si existe
+                    if (typeof window.showLoading === 'function') {
+                        window.showLoading(message);
+                    }
                 }
             }
 
-            formatDuration(seconds) {
-                if (!seconds) return '';
-                const mins = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
-            }
+
 
             async showArtistDetailed(artistId) {
-                this.pushHistory({ type: 'artist', id: artistId });
+                window.pushHistory({ type: 'artist', id: artistId });
                 this.showLoading('Cargando información del artista...');
                 
                 try {
@@ -2008,7 +1998,7 @@
                     const albumsData = await albumsResponse.json();
                     
                     if (artistData.error || albumsData.error) {
-                        this.showError('Error cargando información del artista');
+                        window.showError('Error cargando información del artista');
                         return;
                     }
                     
@@ -2016,7 +2006,7 @@
                     
                 } catch (error) {
                     console.error('Error cargando artista:', error);
-                    this.showError('Error cargando información del artista');
+                    window.showError('Error cargando información del artista');
                 }
             }
 

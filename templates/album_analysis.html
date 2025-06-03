@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Análisis de Álbumes - Music Web Explorer</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="/static/js/global-functions.js"></script>
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/album-search.js"></script>
+    <script src="/static/js/album-analysis.js"></script>
+    <script src="/static/js/charts.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
     <style>
         * {
@@ -528,115 +533,6 @@
         }
 
 
-        async function searchFirstAlbumMatch(searchTerm) {
-            try {
-                const response = await fetch(`/api/albums/search?q=${encodeURIComponent(searchTerm)}&limit=1`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.results && data.results.length > 0) {
-                        selectAlbum(data.results[0]);
-                    } else {
-                        showAlbumNotFound(searchTerm);
-                    }
-                }
-            } catch (error) {
-                console.error('Error buscando primera coincidencia de álbum:', error);
-                showAlbumNotFound(searchTerm);
-            }
-        }
-
-        // Mostrar mensaje de álbum no encontrado
-        function showAlbumNotFound(searchTerm) {
-            const dropdown = document.getElementById('albumDropdown');
-            if (dropdown) {
-                dropdown.innerHTML = `
-                    <div style="padding: 15px; text-align: center; color: #ff6b6b;">
-                        <i class="fas fa-search" style="margin-bottom: 10px; display: block;"></i>
-                        No se encontró "${searchTerm}"
-                        <br><small>Intenta con otro término</small>
-                    </div>
-                `;
-                dropdown.style.display = 'block';
-                
-                setTimeout(() => {
-                    dropdown.style.display = 'none';
-                }, 3000);
-            }
-        }
-
-
-        // Mostrar información del álbum
-        function showAlbumInfo(album) {
-            const initialMessage = document.getElementById('albumInitialMessage');
-            const selectedContent = document.getElementById('selectedAlbumContent');
-            
-            if (initialMessage) {
-                initialMessage.style.display = 'none';
-            }
-            
-            if (selectedContent) {
-                selectedContent.style.display = 'block';
-                selectedContent.innerHTML = `
-                    <div style="text-align: center; padding: 20px; background: rgba(168,230,207,0.1); border-radius: 10px; margin: 20px 0;">
-                        <h3 style="color: #a8e6cf; margin-bottom: 10px;">
-                            <i class="fas fa-compact-disc"></i> ${album.name}
-                        </h3>
-                        <p><strong>Artista:</strong> ${album.artist_name}</p>
-                        <p><strong>Año:</strong> ${album.year || 'Desconocido'}</p>
-                        <p><strong>Género:</strong> ${album.genre || 'Desconocido'}</p>
-                        <p><strong>Sello:</strong> ${album.label || 'Desconocido'}</p>
-                        <p style="margin-top: 15px;">Álbum seleccionado. Las pestañas han cambiado para mostrar análisis detallados.</p>
-                    </div>
-                    <div id="albumAnalysisContent">
-                        <div class="loading">
-                            <i class="fas fa-spinner"></i>
-                            <p>Preparando análisis...</p>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-
-        // Cambiar a pestañas de análisis de álbum
-        function switchToAlbumDetailTabs() {
-            const tabsContainer = document.getElementById('main-tabs');
-            tabsContainer.innerHTML = `
-                <button class="stats-tab back-tab" onclick="returnToMainTabsFromAlbum()">
-                    <i class="fas fa-arrow-left"></i> Atrás
-                </button>
-                <button class="stats-tab" onclick="showStatsCategory('detailed-analysis')">
-                    <i class="fas fa-chart-bar"></i> Análisis Detallado
-                </button>
-                <button class="stats-tab active" onclick="showAlbumAnalysisTab('tiempo')">
-                    <i class="fas fa-clock"></i> Tiempo
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('genero')">
-                    <i class="fas fa-music"></i> Género
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('conciertos')">
-                    <i class="fas fa-microphone"></i> Conciertos
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('sellos')">
-                    <i class="fas fa-record-vinyl"></i> Sellos
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('discografia')">
-                    <i class="fas fa-compact-disc"></i> Discografía
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('escuchas')">
-                    <i class="fas fa-headphones"></i> Escuchas
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('colaboradores')">
-                    <i class="fas fa-users"></i> Colaboradores
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('feeds')">
-                    <i class="fas fa-rss"></i> Feeds
-                </button>
-                <button class="stats-tab" onclick="showAlbumAnalysisTab('letras')">
-                    <i class="fas fa-quote-right"></i> Letras
-                </button>
-            `;
-            currentView = 'album-detail';
-        }
 
         // Volver a la búsqueda
         function returnToSearch() {
@@ -666,12 +562,7 @@
             }
         }
 
-        // Mostrar sección principal
-        function showMainSection(section) {
-            // Por ahora solo tenemos búsqueda
-            console.log(`Mostrando sección: ${section}`);
-        }
-
+  
         // Mostrar pestaña de análisis
         async function showAnalysisTab(tabName) {
             if (!currentAlbumId) {
@@ -736,226 +627,12 @@
             }
         }
 
-        // Renderizar contenido del análisis
-        function renderAnalysisContent(tabName, data, container) {
-            let html = `
-                <div style="margin-bottom: 20px;">
-                    <h3 style="color: #a8e6cf; margin-bottom: 15px;">
-                        <i class="fas fa-chart-${getIconForTab(tabName)}"></i>
-                        Análisis de ${tabName.charAt(0).toUpperCase() + tabName.slice(1)}
-                    </h3>
-                </div>
-            `;
-            
-            // Añadir estadísticas si existen
-            if (data.stats && Object.keys(data.stats).length > 0) {
-                html += '<div class="analysis-stats">';
-                for (const [key, value] of Object.entries(data.stats)) {
-                    const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                    html += `
-                        <div class="analysis-stat-card">
-                            <h5>${displayKey}</h5>
-                            <p>${value}</p>
-                        </div>
-                    `;
-                }
-                html += '</div>';
-            }
-            
-            // Añadir gráficos si existen
-            if (data.charts && Object.keys(data.charts).length > 0) {
-                html += '<div class="analysis-charts-grid">';
-                
-                Object.keys(data.charts).forEach(chartId => {
-                    const chartTitle = chartId.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                    html += `
-                        <div class="analysis-chart-container">
-                            <h4>${chartTitle}</h4>
-                            <div id="chart-${chartId}" style="height: 350px;"></div>
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-            } else {
-                html += `
-                    <div style="text-align: center; padding: 40px; color: #ccc;">
-                        <i class="fas fa-chart-bar" style="font-size: 2rem; margin-bottom: 15px; display: block; opacity: 0.5;"></i>
-                        <p>No hay gráficos disponibles para este análisis</p>
-                    </div>
-                `;
-            }
-            
-            // Añadir información adicional específica por tipo
-            if (data.same_year_albums && data.same_year_albums.length > 0) {
-                html += renderAdditionalData('Álbumes del mismo año', data.same_year_albums);
-            }
-            
-            if (data.same_genre_albums && data.same_genre_albums.length > 0) {
-                html += renderAdditionalData('Otros álbumes del género', data.same_genre_albums);
-            }
-            
-            if (data.concerts_with_album && data.concerts_with_album.length > 0) {
-                html += renderConcertsData(data.concerts_with_album);
-            }
-            
-            if (data.recent_feeds && data.recent_feeds.length > 0) {
-                html += renderFeedsData(data.recent_feeds);
-            }
-            
-            if (data.top_words && data.top_words.length > 0) {
-                html += renderWordsData(data.top_words);
-            }
-            
-            container.innerHTML = html;
-            
-            // Renderizar gráficos si existen
-            if (data.charts && Object.keys(data.charts).length > 0) {
-                console.log(`📊 Renderizando ${Object.keys(data.charts).length} gráficos...`);
-                
-                Object.keys(data.charts).forEach((chartId, index) => {
-                    setTimeout(() => {
-                        try {
-                            const chartContainer = document.getElementById(`chart-${chartId}`);
-                            if (chartContainer && data.charts[chartId]) {
-                                console.log(`📈 Renderizando gráfico: ${chartId}`);
-                                
-                                const plotData = typeof data.charts[chartId] === 'string' ? 
-                                    JSON.parse(data.charts[chartId]) : data.charts[chartId];
-                                
-                                if (window.Plotly && plotData.data && plotData.layout) {
-                                    Plotly.newPlot(`chart-${chartId}`, plotData.data, plotData.layout, {
-                                        responsive: true,
-                                        displayModeBar: false
-                                    });
-                                    console.log(`✅ Gráfico ${chartId} renderizado correctamente`);
-                                } else {
-                                    console.error(`❌ Datos de gráfico inválidos para ${chartId}:`, plotData);
-                                }
-                            }
-                        } catch (error) {
-                            console.error(`💥 Error renderizando gráfico ${chartId}:`, error);
-                            const container = document.getElementById(`chart-${chartId}`);
-                            if (container) {
-                                container.innerHTML = '<div style="text-align: center; color: #ff6b6b; padding: 20px;">Error renderizando gráfico</div>';
-                            }
-                        }
-                    }, 100 * index);
-                });
-            }
-            
-            console.log(`✅ Análisis de ${tabName} cargado correctamente`);
-        }
+ 
 
-        // Obtener icono para cada pestaña
-        function getIconForTab(tabName) {
-            const icons = {
-                'tiempo': 'clock',
-                'genero': 'music',
-                'conciertos': 'microphone',
-                'sellos': 'record-vinyl',
-                'discografia': 'compact-disc',
-                'escuchas': 'headphones',
-                'colaboradores': 'users',
-                'feeds': 'rss',
-                'letras': 'quote-right'
-            };
-            return icons[tabName] || 'bar';
-        }
 
-        // Renderizar datos adicionales
-        function renderAdditionalData(title, data) {
-            let html = `
-                <div style="background: rgba(255,255,255,0.05); border-radius: 10px; padding: 15px; margin-top: 20px;">
-                    <h4 style="color: #a8e6cf; margin-bottom: 15px;">${title}</h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
-            `;
-            
-            data.slice(0, 10).forEach(item => {
-                html += `
-                    <div style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <strong>${item.artist_name || item.name}</strong> - ${item.name || item.artist_name}
-                        ${item.year ? `<span style="color: #a8e6cf;"> (${item.year})</span>` : ''}
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
 
-        // Renderizar datos de conciertos
-        function renderConcertsData(concerts) {
-            let html = `
-                <div style="background: rgba(255,255,255,0.05); border-radius: 10px; padding: 15px; margin-top: 20px;">
-                    <h4 style="color: #a8e6cf; margin-bottom: 15px;">Conciertos con canciones del álbum</h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
-            `;
-            
-            concerts.forEach(concert => {
-                html += `
-                    <div style="padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <strong>${concert.date}</strong> - ${concert.venue}
-                        <br><small style="color: #a8e6cf;">${concert.city}, ${concert.country}</small>
-                        <br><small>Canciones: ${concert.album_tracks.join(', ')}</small>
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
 
-        // Renderizar datos de feeds
-        function renderFeedsData(feeds) {
-            let html = `
-                <div style="background: rgba(255,255,255,0.05); border-radius: 10px; padding: 15px; margin-top: 20px;">
-                    <h4 style="color: #a8e6cf; margin-bottom: 15px;">Feeds recientes</h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
-            `;
-            
-            feeds.forEach(feed => {
-                html += `
-                    <div style="padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <strong>${feed.post_title}</strong>
-                        <br><small style="color: #a8e6cf;">${feed.feed_name} - ${feed.post_date}</small>
-                        ${feed.post_url ? `<br><a href="${feed.post_url}" target="_blank" style="color: #a8e6cf; text-decoration: none;">Ver enlace</a>` : ''}
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
 
-        // Renderizar datos de palabras
-        function renderWordsData(words) {
-            let html = `
-                <div style="background: rgba(255,255,255,0.05); border-radius: 10px; padding: 15px; margin-top: 20px;">
-                    <h4 style="color: #a8e6cf; margin-bottom: 15px;">Palabras más frecuentes</h4>
-                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-            `;
-            
-            words.forEach(word => {
-                const fontSize = Math.max(0.8, Math.min(1.5, word.count / words[0].count));
-                html += `
-                    <span style="background: rgba(168,230,207,0.2); padding: 5px 10px; border-radius: 15px; font-size: ${fontSize}rem;">
-                        ${word.word} (${word.count})
-                    </span>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
-
-        // Configurar eventos globales
-        document.addEventListener('click', (e) => {
-            const dropdown = document.getElementById('albumDropdown');
-            if (dropdown && !e.target.closest('#albumSearchInput') && !e.target.closest('#albumDropdown')) {
-                dropdown.style.display = 'none';
-            }
-        });
 
     </script>
 </body>
