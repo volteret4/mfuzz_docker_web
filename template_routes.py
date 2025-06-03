@@ -624,11 +624,11 @@ class TemplateRoutes:
                 
                 data.results.forEach((album, index) => {
                     const item = document.createElement('div');
-                    item.className = 'album-search-item';
+                    item.style.cssText = 'padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background 0.2s ease;';
                     
                     item.innerHTML = `
-                        <div class="album-display-name">${album.display_name}</div>
-                        <div class="album-details">
+                        <div style="font-weight: bold; margin-bottom: 5px;">${album.display_name}</div>
+                        <div style="font-size: 0.85rem; color: #a8e6cf;">
                             ${album.year ? `${album.year}` : 'Año desconocido'} • 
                             ${album.genre || 'Género desconocido'} • 
                             ${album.label || 'Sello desconocido'}
@@ -639,6 +639,14 @@ class TemplateRoutes:
                         e.preventDefault();
                         console.log(`🖱️ Click en álbum: ${album.display_name}`);
                         selectAlbum(album);
+                    });
+                    
+                    item.addEventListener('mouseover', function() {
+                        item.style.background = 'rgba(168,230,207,0.2)';
+                    });
+                    
+                    item.addEventListener('mouseout', function() {
+                        item.style.background = 'transparent';
                     });
                     
                     dropdown.appendChild(item);
@@ -711,41 +719,79 @@ class TemplateRoutes:
             switchToAlbumDetailTabs();
             
             setTimeout(() => {
-                showAnalysisTab('tiempo');
+                showAlbumAnalysisTab('tiempo');
             }, 100);
         }
 
         // Mostrar información del álbum
         function showAlbumInfo(album) {
-            const albumInfo = document.getElementById('selected-album-info');
-            const searchSection = document.getElementById('search-section');
+            const initialMessage = document.getElementById('albumInitialMessage');
+            const selectedContent = document.getElementById('selectedAlbumContent');
             
-            if (albumInfo && searchSection) {
-                searchSection.style.display = 'none';
-                albumInfo.style.display = 'block';
-                
-                document.getElementById('album-title').textContent = album.name || 'Título desconocido';
-                document.getElementById('album-artist').textContent = album.artist_name || 'Artista desconocido';
-                document.getElementById('album-year').textContent = album.year || 'Año desconocido';
-                document.getElementById('album-genre').textContent = album.genre || 'Género desconocido';
-                document.getElementById('album-label').textContent = album.label || 'Sello desconocido';
-                
-                const albumImg = document.getElementById('album-cover-img');
-                if (albumImg) {
-                    albumImg.src = `/api/images/album/${album.id}`;
-                    albumImg.onerror = function() {
-                        this.style.display = 'none';
-                    };
-                }
+            if (initialMessage) {
+                initialMessage.style.display = 'none';
+            }
+            
+            if (selectedContent) {
+                selectedContent.style.display = 'block';
+                selectedContent.innerHTML = `
+                    <div style="text-align: center; padding: 20px; background: rgba(168,230,207,0.1); border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #a8e6cf; margin-bottom: 10px;">
+                            <i class="fas fa-compact-disc"></i> ${album.name}
+                        </h3>
+                        <p><strong>Artista:</strong> ${album.artist_name}</p>
+                        <p><strong>Año:</strong> ${album.year || 'Desconocido'}</p>
+                        <p><strong>Género:</strong> ${album.genre || 'Desconocido'}</p>
+                        <p><strong>Sello:</strong> ${album.label || 'Desconocido'}</p>
+                        <p style="margin-top: 15px;">Álbum seleccionado. Las pestañas han cambiado para mostrar análisis detallados.</p>
+                    </div>
+                    <div id="albumAnalysisContent">
+                        <div class="loading">
+                            <i class="fas fa-spinner"></i>
+                            <p>Preparando análisis...</p>
+                        </div>
+                    </div>
+                `;
             }
         }
+
 
         // Cambiar a pestañas de análisis
         function switchToAlbumDetailTabs() {
             const tabsContainer = document.getElementById('main-tabs');
             tabsContainer.innerHTML = `
-                <button class="main-tab back-tab" onclick="returnToSearch()">
-                    <i class="fas fa-arrow-left"></i> Volver a Búsqueda
+                <button class="stats-tab back-tab" onclick="returnToMainTabsFromAlbum()">
+                    <i class="fas fa-arrow-left"></i> Atrás
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('detailed-analysis')">
+                    <i class="fas fa-chart-bar"></i> Análisis Detallado
+                </button>
+                <button class="stats-tab active" onclick="showAlbumAnalysisTab('tiempo')">
+                    <i class="fas fa-clock"></i> Tiempo
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('genero')">
+                    <i class="fas fa-music"></i> Género
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('conciertos')">
+                    <i class="fas fa-microphone"></i> Conciertos
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('sellos')">
+                    <i class="fas fa-record-vinyl"></i> Sellos
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('discografia')">
+                    <i class="fas fa-compact-disc"></i> Discografía
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('escuchas')">
+                    <i class="fas fa-headphones"></i> Escuchas
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('colaboradores')">
+                    <i class="fas fa-users"></i> Colaboradores
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('feeds')">
+                    <i class="fas fa-rss"></i> Feeds
+                </button>
+                <button class="stats-tab" onclick="showAlbumAnalysisTab('letras')">
+                    <i class="fas fa-quote-right"></i> Letras
                 </button>
             `;
             currentView = 'album-detail';

@@ -511,11 +511,8 @@
             <button class="stats-tab" onclick="showStatsCategory('missing')">
                 <i class="fas fa-exclamation-triangle"></i> Datos Faltantes
             </button>
-            <button class="stats-tab" onclick="showStatsCategory('artist-analysis')">
-                <i class="fas fa-chart-line"></i> Análisis Artistas
-            </button>
-            <button class="stats-tab" onclick="showStatsCategory('album-analysis')">
-                <i class="fas fa-compact-disc"></i> Análisis Álbumes
+            <button class="stats-tab" onclick="showStatsCategory('detailed-analysis')">
+                <i class="fas fa-chart-bar"></i> Análisis Detallado
             </button>
         </div>
 
@@ -615,6 +612,9 @@
                 <button class="stats-tab back-tab" onclick="returnToMainTabs()">
                     <i class="fas fa-arrow-left"></i> Atrás
                 </button>
+                <button class="stats-tab" onclick="showStatsCategory('detailed-analysis')">
+                    <i class="fas fa-chart-bar"></i> Análisis Detallado
+                </button>
                 <button class="stats-tab active" onclick="showArtistAnalysisTab('tiempo')">
                     <i class="fas fa-clock"></i> Tiempo
                 </button>
@@ -642,6 +642,36 @@
             `;
             currentView = 'artist-detail';
         }
+
+        function returnToMainTabsFromAlbum() {
+            const tabsContainer = document.getElementById('main-tabs');
+            tabsContainer.innerHTML = `
+                <button class="stats-tab active" onclick="showStatsCategory('artists')">
+                    <i class="fas fa-user-friends"></i> Artistas
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('albums')">
+                    <i class="fas fa-compact-disc"></i> Álbumes
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('songs')">
+                    <i class="fas fa-music"></i> Canciones
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('database')">
+                    <i class="fas fa-database"></i> Base de Datos
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('missing')">
+                    <i class="fas fa-exclamation-triangle"></i> Datos Faltantes
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('detailed-analysis')">
+                    <i class="fas fa-chart-bar"></i> Análisis Detallado
+                </button>
+            `;
+            currentView = 'main';
+            currentAlbumId = null;
+            
+            // Volver a mostrar análisis detallado
+            showStatsCategory('detailed-analysis');
+        }
+
 
         function returnToMainTabs() {
             const tabsContainer = document.getElementById('main-tabs');
@@ -686,28 +716,15 @@
             const statsContent = document.getElementById('stats-content');
             if (!statsContent) return;
             
-            // NUEVO: Manejar redirección a análisis de álbumes
+            // NUEVO: Manejar "análisis detallado" como submenú
+            if (category === 'detailed-analysis') {
+                showDetailedAnalysisMenu();
+                return;
+            }
+            
+            // MODIFICADO: Manejar análisis de álbumes como tab interno
             if (category === 'album-analysis') {
-                statsContent.innerHTML = `
-                    <div style="text-align: center; padding: 60px; background: rgba(255,255,255,0.05); border-radius: 20px;">
-                        <i class="fas fa-compact-disc" style="font-size: 4rem; margin-bottom: 20px; display: block; color: #a8e6cf;"></i>
-                        <h3 style="color: #a8e6cf; margin-bottom: 15px;">Análisis de Álbumes</h3>
-                        <p style="margin-bottom: 25px;">Redirigiendo a la página de análisis detallado de álbumes...</p>
-                        <div class="loading" style="margin: 20px 0;">
-                            <i class="fas fa-spinner"></i>
-                        </div>
-                    </div>
-                `;
-                
-                // Redirigir después de 1.5 segundos
-                setTimeout(() => {
-                    window.open('/album_analysis.html', '_blank');
-                    
-                    // Volver a la pestaña anterior después de abrir
-                    setTimeout(() => {
-                        showStatsCategory('artists'); // O la pestaña que prefieras por defecto
-                    }, 500);
-                }, 1500);
+                await showAlbumAnalysis(statsContent);
                 return;
             }
             
@@ -727,6 +744,63 @@
                 console.error(`Error cargando estadísticas de ${category}:`, error);
                 statsContent.innerHTML = `<div class="error-message">Error cargando estadísticas de ${category}</div>`;
             }
+        }
+
+
+        function showDetailedAnalysisMenu() {
+            const statsContent = document.getElementById('stats-content');
+            
+            const content = `
+                <div class="stats-section">
+                    <h2>Análisis Detallado</h2>
+                    <p style="margin-bottom: 30px; color: #ccc;">Selecciona el tipo de análisis que deseas realizar:</p>
+                    
+                    <div class="system-overview" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
+                        <div class="system-card" style="cursor: pointer; transition: all 0.3s ease;" 
+                            onclick="showStatsCategory('artist-analysis')" 
+                            onmouseover="this.style.transform='translateY(-8px) scale(1.02)'" 
+                            onmouseout="this.style.transform='translateY(0) scale(1)'">
+                            <h3><i class="fas fa-user-friends"></i> Análisis de Artistas</h3>
+                            <div class="value" style="font-size: 1.2rem; color: #a8e6cf;">
+                                <i class="fas fa-chart-line" style="font-size: 2.5rem; margin: 15px 0;"></i>
+                            </div>
+                            <div class="label">
+                                Análisis detallado por artista con gráficos de tiempo, géneros, 
+                                conciertos, sellos, discografía, escuchas y colaboradores
+                            </div>
+                        </div>
+                        
+                        <div class="system-card" style="cursor: pointer; transition: all 0.3s ease;" 
+                            onclick="showStatsCategory('album-analysis')" 
+                            onmouseover="this.style.transform='translateY(-8px) scale(1.02)'" 
+                            onmouseout="this.style.transform='translateY(0) scale(1)'">
+                            <h3><i class="fas fa-compact-disc"></i> Análisis de Álbumes</h3>
+                            <div class="value" style="font-size: 1.2rem; color: #a8e6cf;">
+                                <i class="fas fa-chart-pie" style="font-size: 2.5rem; margin: 15px 0;"></i>
+                            </div>
+                            <div class="label">
+                                Análisis detallado por álbum con datos de tiempo, género, 
+                                conciertos, sellos, colaboradores, feeds y letras
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 40px; padding: 20px; 
+                                background: rgba(255,255,255,0.05); border-radius: 15px;">
+                        <p style="color: #a8e6cf; margin-bottom: 10px;">
+                            <i class="fas fa-info-circle"></i> Próximamente
+                        </p>
+                        <p style="color: #ccc; font-size: 0.9rem;">
+                            • Análisis de géneros globales<br>
+                            • Análisis de sellos discográficos<br>
+                            • Análisis de tendencias temporales<br>
+                            • Comparativas y correlaciones
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            statsContent.innerHTML = content;
         }
 
         async function showArtistAnalysis(container) {
@@ -764,6 +838,158 @@
             setupArtistSearchEvents();
         }
 
+        // Filtrar álbumes
+        async function filterAlbums(searchTerm) {
+            const dropdown = document.getElementById('albumDropdown');
+            
+            if (!dropdown) {
+                console.error('❌ Dropdown no encontrado');
+                return;
+            }
+            
+            if (!searchTerm || searchTerm.trim().length < 1) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            try {
+                console.log(`🔍 Buscando álbumes: "${searchTerm}"`);
+                
+                const response = await fetch(`/api/albums/search?q=${encodeURIComponent(searchTerm)}&limit=15`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log(`📊 Respuesta de búsqueda:`, data);
+                
+                dropdown.innerHTML = '';
+                
+                if (data.error) {
+                    dropdown.innerHTML = `<div style="padding: 10px 15px; color: #ff6b6b;">${data.error}</div>`;
+                    dropdown.style.display = 'block';
+                    return;
+                }
+                
+                if (!data.results || data.results.length === 0) {
+                    dropdown.innerHTML = '<div style="padding: 10px 15px; color: #ff6b6b;">No se encontraron álbumes</div>';
+                    dropdown.style.display = 'block';
+                    return;
+                }
+                
+                data.results.forEach((album, index) => {
+                    const item = document.createElement('div');
+                    item.style.cssText = 'padding: 12px 15px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background 0.2s ease;';
+                    
+                    item.innerHTML = `
+                        <div style="font-weight: bold; margin-bottom: 5px;">${album.display_name}</div>
+                        <div style="font-size: 0.85rem; color: #a8e6cf;">
+                            ${album.year ? `${album.year}` : 'Año desconocido'} • 
+                            ${album.genre || 'Género desconocido'} • 
+                            ${album.label || 'Sello desconocido'}
+                        </div>
+                    `;
+                    
+                    item.addEventListener('mousedown', function(e) {
+                        e.preventDefault();
+                        console.log(`🖱️ Click en álbum: ${album.display_name}`);
+                        selectAlbum(album);
+                    });
+                    
+                    item.addEventListener('mouseover', function() {
+                        item.style.background = 'rgba(168,230,207,0.2)';
+                    });
+                    
+                    item.addEventListener('mouseout', function() {
+                        item.style.background = 'transparent';
+                    });
+                    
+                    dropdown.appendChild(item);
+                });
+                
+                dropdown.style.display = 'block';
+                console.log(`✅ Mostrados ${data.results.length} álbumes`);
+                
+            } catch (error) {
+                console.error('💥 Error buscando álbumes:', error);
+                dropdown.innerHTML = `<div style="padding: 15px; text-align: center; color: #ff6b6b;">Error de conexión: ${error.message}</div>`;
+                dropdown.style.display = 'block';
+            }
+        }
+
+        // Seleccionar álbum
+        function selectAlbum(album) {
+            console.log(`🎯 Seleccionando álbum: ${album.display_name} (ID: ${album.id})`);
+            
+            currentAlbumId = album.id;
+            
+            const input = document.getElementById('albumSearchInput');
+            const dropdown = document.getElementById('albumDropdown');
+            
+            if (input) {
+                input.value = album.display_name;
+            }
+            if (dropdown) {
+                dropdown.style.display = 'none';
+            }
+            
+            showAlbumInfo(album);
+            switchToAlbumDetailTabs();
+            
+            setTimeout(() => {
+                showAlbumAnalysisTab('tiempo');
+            }, 100);
+        }
+
+        
+        // Configurar eventos del buscador de álbumes
+        function setupAlbumSearchEvents() {
+            const input = document.getElementById('albumSearchInput');
+            const dropdown = document.getElementById('albumDropdown');
+            
+            if (!input || !dropdown) {
+                console.error('❌ No se encontraron elementos del buscador de álbumes');
+                console.log('🔍 Debug - elementos existentes:');
+                console.log('   - albumSearchInput:', !!document.getElementById('albumSearchInput'));
+                console.log('   - albumDropdown:', !!document.getElementById('albumDropdown'));
+                return;
+            }
+            
+            console.log('🔧 Configurando eventos del buscador de álbumes');
+            
+            input.addEventListener('input', function(e) {
+                const searchTerm = e.target.value;
+                console.log(`🔍 Búsqueda de álbum: "${searchTerm}"`);
+                filterAlbums(searchTerm);
+            });
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const searchTerm = e.target.value.trim();
+                    console.log(`⏎ Enter presionado con: "${searchTerm}"`);
+                    
+                    if (searchTerm.length >= 2) {
+                        searchFirstAlbumMatch(searchTerm);
+                    }
+                }
+            });
+            
+            input.addEventListener('focus', function(e) {
+                const searchTerm = e.target.value;
+                if (searchTerm.length >= 1) {
+                    filterAlbums(searchTerm);
+                }
+            });
+            
+            input.addEventListener('blur', function(e) {
+                setTimeout(() => {
+                    dropdown.style.display = 'none';
+                }, 200);
+            });
+        }
+
         async function showAlbumAnalysis(container) {
             container.innerHTML = `
                 <div class="stats-section">
@@ -775,7 +1001,8 @@
                         <div style="position: relative;">
                             <input type="text" id="albumSearchInput" 
                                 style="width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; background: rgba(255,255,255,0.1); color: white; outline: none;"
-                                placeholder="Buscar álbum (ej: Pink Floyd - Dark Side)..." autocomplete="off">
+                                placeholder="Buscar por artista o álbum (ej: 'Pink Floyd' o 'Pink Floyd - Dark Side')" 
+                                autocomplete="off">
                             <div id="albumDropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: rgba(42,82,152,0.95); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; max-height: 200px; overflow-y: auto; margin-top: 5px; z-index: 1000; backdrop-filter: blur(10px);"></div>
                         </div>
                     </div>
@@ -787,7 +1014,7 @@
                         <p><small>Escribe el nombre del artista o álbum para comenzar</small></p>
                     </div>
                     
-                    <!-- Contenido del álbum seleccionado -->
+                    <!-- Información del álbum seleccionado -->
                     <div id="selectedAlbumContent" style="display: none;">
                         <!-- Se carga dinámicamente -->
                     </div>
@@ -1586,7 +1813,192 @@
         }
 
 
+        async function showAlbumAnalysisTab(tabName) {
+            if (!currentAlbumId) {
+                console.warn('❌ No hay álbum seleccionado');
+                return;
+            }
+            
+            console.log(`📊 Cargando análisis: ${tabName} para álbum ID ${currentAlbumId}`);
+            
+            // Actualizar pestañas activas en vista de álbum
+            if (currentView === 'album-detail') {
+                document.querySelectorAll('.stats-tab:not(.back-tab)').forEach(tab => tab.classList.remove('active'));
+                
+                // Buscar y activar la pestaña correspondiente
+                document.querySelectorAll('.stats-tab').forEach(tab => {
+                    const onclickStr = tab.getAttribute('onclick') || '';
+                    if (onclickStr.includes(`'${tabName}'`)) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
+            
+            // Buscar el contenedor correcto
+            let content = document.getElementById('albumAnalysisContent');
+            if (!content) {
+                content = document.getElementById('selectedAlbumContent');
+            }
+            
+            if (!content) {
+                console.error('❌ No se encontró contenedor para el análisis de álbum');
+                return;
+            }
+            
+            content.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i><p>Cargando análisis...</p></div>';
+            
+            try {
+                console.log(`🌐 Haciendo petición a: /api/albums/${currentAlbumId}/analysis/${tabName}`);
+                const response = await fetch(`/api/albums/${currentAlbumId}/analysis/${tabName}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('📄 Respuesta del servidor:', data);
+                
+                if (data.error) {
+                    content.innerHTML = `
+                        <div class="error-message">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <p><strong>Error:</strong> ${data.error}</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Renderizar análisis de álbum
+                renderAlbumAnalysisContent(tabName, data, content);
+                
+            } catch (error) {
+                console.error(`💥 Error cargando análisis ${tabName}:`, error);
+                content.innerHTML = `
+                    <div class="error-message">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p><strong>Error de conexión:</strong> ${error.message}</p>
+                        <button class="btn" onclick="showAlbumAnalysisTab('${tabName}')" style="margin-top: 10px; background: #2a5298; color: white; border: none; padding: 8px 15px; border-radius: 8px; cursor: pointer;">
+                            <i class="fas fa-redo"></i> Reintentar
+                        </button>
+                    </div>
+                `;
+            }
+        }
 
+        function getIconForAlbumTab(tabName) {
+            const icons = {
+                'tiempo': 'clock',
+                'genero': 'music',
+                'conciertos': 'microphone',
+                'sellos': 'record-vinyl',
+                'discografia': 'compact-disc',
+                'escuchas': 'headphones',
+                'colaboradores': 'users',
+                'feeds': 'rss',
+                'letras': 'quote-right'
+            };
+            return icons[tabName] || 'bar';
+        }
+
+        function renderAlbumAnalysisContent(tabName, data, container) {
+            let html = `
+                <div style="background: rgba(255,255,255,0.05); border-radius: 15px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #a8e6cf; margin-bottom: 15px;">
+                        <i class="fas fa-chart-${getIconForAlbumTab(tabName)}"></i>
+                        Análisis de ${tabName.charAt(0).toUpperCase() + tabName.slice(1)}
+                    </h3>
+            `;
+            
+            // Añadir estadísticas si existen
+            if (data.stats && Object.keys(data.stats).length > 0) {
+                html += '<div class="analysis-stats">';
+                for (const [key, value] of Object.entries(data.stats)) {
+                    const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    html += `
+                        <div class="analysis-stat-card">
+                            <h5>${displayKey}</h5>
+                            <p>${value}</p>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            
+            // Añadir mensaje si existe
+            if (data.message) {
+                html += `
+                    <div style="text-align: center; padding: 30px; background: rgba(255,255,255,0.1); border-radius: 10px; margin: 20px 0;">
+                        <i class="fas fa-info-circle" style="font-size: 2rem; color: #a8e6cf; margin-bottom: 15px; display: block;"></i>
+                        <p style="color: #a8e6cf; font-size: 1.1rem;">${data.message}</p>
+                    </div>
+                `;
+            }
+            
+            // Añadir gráficos si existen
+            if (data.charts && Object.keys(data.charts).length > 0) {
+                html += '<div class="analysis-charts-grid">';
+                
+                Object.keys(data.charts).forEach(chartId => {
+                    const chartTitle = chartId.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    html += `
+                        <div class="analysis-chart-container">
+                            <h4>${chartTitle}</h4>
+                            <div id="chart-${chartId}" style="height: 350px;"></div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            } else if (!data.message) {
+                html += `
+                    <div style="text-align: center; padding: 40px; color: #ccc;">
+                        <i class="fas fa-chart-bar" style="font-size: 2rem; margin-bottom: 15px; display: block; opacity: 0.5;"></i>
+                        <p>No hay gráficos disponibles para este análisis</p>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            
+            container.innerHTML = html;
+            
+            // Renderizar gráficos si existen
+            if (data.charts && Object.keys(data.charts).length > 0) {
+                console.log(`📊 Renderizando ${Object.keys(data.charts).length} gráficos de álbum...`);
+                
+                Object.keys(data.charts).forEach((chartId, index) => {
+                    setTimeout(() => {
+                        try {
+                            const chartContainer = document.getElementById(`chart-${chartId}`);
+                            if (chartContainer && data.charts[chartId]) {
+                                console.log(`📈 Renderizando gráfico de álbum: ${chartId}`);
+                                
+                                const plotData = typeof data.charts[chartId] === 'string' ? 
+                                    JSON.parse(data.charts[chartId]) : data.charts[chartId];
+                                
+                                if (window.Plotly && plotData.data && plotData.layout) {
+                                    Plotly.newPlot(`chart-${chartId}`, plotData.data, plotData.layout, {
+                                        responsive: true,
+                                        displayModeBar: false
+                                    });
+                                    console.log(`✅ Gráfico de álbum ${chartId} renderizado correctamente`);
+                                } else {
+                                    console.error(`❌ Datos de gráfico inválidos para ${chartId}:`, plotData);
+                                }
+                            }
+                        } catch (error) {
+                            console.error(`💥 Error renderizando gráfico de álbum ${chartId}:`, error);
+                            const container = document.getElementById(`chart-${chartId}`);
+                            if (container) {
+                                container.innerHTML = '<div style="text-align: center; color: #ff6b6b; padding: 20px;">Error renderizando gráfico</div>';
+                            }
+                        }
+                    }, 100 * index);
+                });
+            }
+            
+            console.log(`✅ Análisis de álbum ${tabName} cargado correctamente`);
+        }
 
 
         // Configurar eventos globales al cargar

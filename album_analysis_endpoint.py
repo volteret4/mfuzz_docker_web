@@ -3,9 +3,11 @@
 
 import logging
 import json
+import os  # Agregar este import
 from collections import Counter, defaultdict
-from flask import jsonify
+from flask import jsonify, request  # Agregar request aquí
 import re
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -22,93 +24,193 @@ class AlbumAnalysisEndpoints:
         """Configura las rutas para análisis de álbumes"""
         
         @self.app.route('/api/albums/search')
-        def api_search_albums_detailed():
-            """Búsqueda detallada de álbumes con formato $artist - $album"""
-            from flask import request
-            
-            query = request.args.get('q', '').strip()
-            limit = min(int(request.args.get('limit', 50)), 100)
-            
-            if len(query) < 2:
-                return jsonify({'error': 'Consulta muy corta', 'results': []})
-            
+        def api_search_albums():
+            """Buscar álbumes para el análisis detallado"""
             try:
-                # Buscar álbumes con formato "artista - álbum"
+                query = request.args.get('q', '').strip()
+                limit = min(int(request.args.get('limit', 15)), 50)
+                
+                logger.info(f"Búsqueda de álbumes: query='{query}', limit={limit}")
+                
+                if len(query) < 2:
+                    return jsonify({'error': 'Consulta muy corta', 'results': []})
+                
+                if not self.db_manager:
+                    logger.error("db_manager no disponible")
+                    return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
+                
+                # Test básico de conexión
+                try:
+                    test_result = self.db_manager.execute_query("SELECT COUNT(*) as total FROM albums LIMIT 1")
+                    logger.info(f"✅ Test de conexión DB exitoso: {test_result}")
+                except Exception as e:
+                    logger.error(f"❌ Error test DB: {e}")
+                    return jsonify({'error': f'Error de base de datos: {str(e)}', 'results': []}), 500
+                
+
+
+                # CONSULTA SQL CORREGIDA
                 search_query = """
-                    SELECT a.id, a.name, ar.name as artist_name, a.year, a.genre, a.label,
-                           (ar.name || ' - ' || a.name) as display_name
+                    SELECT DISTINCT 
+                        a.id,
+                        a.name,
+                        a.year,
+                        a.genre,
+                        a.label,
+                        ar.name as artist_name,
+                        (ar.name || ' - ' || a.name) as display_name
                     FROM albums a
-                    JOIN artists ar ON a.artist_id = ar.id
-                    WHERE a.name IS NOT NULL AND a.name != ''
-                    AND ar.name IS NOT NULL AND ar.name != ''
-                    AND (
+                    LEFT JOIN artists ar ON a.artist_id = ar.id
+                    WHERE (
+                        a.name LIKE ? OR 
+                        ar.name LIKE ? OR 
                         (ar.name || ' - ' || a.name) LIKE ?
-                        OR a.name LIKE ?
-                        OR ar.name LIKE ?
                     )
-                    ORDER BY ar.name, a.name
+                    AND a.name IS NOT NULL AND a.name != ''
+                    AND ar.name IS NOT NULL AND ar.name != ''
+                    ORDER BY ar.name, a.year, a.name
                     LIMIT ?
                 """
                 
-                search_term = f"%{query}%"
-                rows = self.db_manager.execute_query(search_query, (search_term, search_term, search_term, limit))
+                search_pattern = f"%{query}%"
+                logger.debug(f"Ejecutando consulta con patrón: {search_pattern}")
+                
+                albums = self.db_manager.execute_query(search_query, 
+                                                    (search_pattern, search_pattern, search_pattern, limit))
+                
+                logger.info(f"Encontrados {len(albums)} álbumes")
                 
                 results = []
-                for row in rows:
-                    results.append({
-                        'id': row['id'],
-                        'name': row['name'],
-                        'artist_name': row['artist_name'],
-                        'display_name': row['display_name'],
-                        'year': row['year'],
-                        'genre': row['genre'],
-                        'label': row['label']
-                    })
+                for album in albums:
+                    album_data = {
+                        'id': album['id'],
+                        'name': album['name'] or 'Sin nombre',
+                        'year': album['year'] or 'Desconocido',
+                        'genre': album['genre'] or 'Desconocido',
+                        'label': album['label'] or 'Desconocido',
+                        'artist_name': album['artist_name'] or 'Artista desconocido',
+                        'display_name': album['display_name'] or f"Album {album['id']}"
+                    }
+                    results.append(album_data)
                 
-                return jsonify({'results': results, 'total': len(results)})
+                return jsonify({
+                    'results': results, 
+                    'total': len(results),
+                    'query': query
+                })
                 
             except Exception as e:
-                logger.error(f"Error en búsqueda de álbumes: {e}")
+                logger.error(f"Error buscando álbumes: {e}")
+                import traceback
+                traceback.print_exc()
                 return jsonify({'error': str(e), 'results': []}), 500
-        
+
+
         @self.app.route('/api/albums/<int:album_id>/analysis/<analysis_type>')
         def api_album_analysis(album_id, analysis_type):
-            """Endpoint unificado para análisis de álbumes"""
+            """Endpoint para análisis de álbumes"""
             try:
+                logger.info(f"Análisis de álbum: ID={album_id}, tipo={analysis_type}")
+                
                 # Verificar que el álbum existe
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
                 
-                # Crear análisis según el tipo
+                # Crear análisis según el tipo - SIN pasar album como parámetro
                 if analysis_type == 'tiempo':
-                    return jsonify(self._get_album_time_analysis(album_id, album))
+                    return jsonify(self._get_album_time_analysis(album_id))
                 elif analysis_type == 'genero':
-                    return jsonify(self._get_album_genre_analysis(album_id, album))
+                    return jsonify(self._get_album_genre_analysis(album_id))
                 elif analysis_type == 'conciertos':
-                    return jsonify(self._get_album_concerts_analysis(album_id, album))
+                    return jsonify(self._get_album_concerts_analysis(album_id))
                 elif analysis_type == 'sellos':
-                    return jsonify(self._get_album_labels_analysis(album_id, album))
+                    return jsonify(self._get_album_labels_analysis(album_id))
                 elif analysis_type == 'discografia':
-                    return jsonify(self._get_album_discography_analysis(album_id, album))
+                    return jsonify(self._get_album_discography_analysis(album_id))
                 elif analysis_type == 'escuchas':
-                    return jsonify(self._get_album_listens_analysis(album_id, album))
+                    return jsonify(self._get_album_listens_analysis(album_id))
                 elif analysis_type == 'colaboradores':
-                    return jsonify(self._get_album_collaborators_analysis(album_id, album))
+                    return jsonify(self._get_album_collaborators_analysis(album_id))
                 elif analysis_type == 'feeds':
-                    return jsonify(self._get_album_feeds_analysis(album_id, album))
+                    return jsonify(self._get_album_feeds_analysis(album_id))
                 elif analysis_type == 'letras':
-                    return jsonify(self._get_album_lyrics_analysis(album_id, album))
+                    return jsonify(self._get_album_lyrics_analysis(album_id))
                 else:
                     return jsonify({'error': f'Tipo de análisis no soportado: {analysis_type}'}), 400
                     
             except Exception as e:
                 logger.error(f"Error en análisis {analysis_type} para álbum {album_id}: {e}")
+                import traceback
+                traceback.print_exc()
                 return jsonify({'error': str(e)}), 500
     
-    def _get_album_time_analysis(self, album_id, album):
+    # DEGBUG DELETEME
+        @self.app.route('/api/debug/albums-search')
+        def debug_albums_search():
+            """Debug de búsqueda de álbumes"""
+            try:
+                # Test básico de conexión
+                test_query = "SELECT COUNT(*) as total FROM albums"
+                total_result = self.db_manager.execute_query(test_query)
+                total_albums = total_result[0]['total'] if total_result else 0
+                
+                # Test de primeros álbumes
+                sample_query = """
+                    SELECT a.id, a.name, a.year, ar.name as artist_name,
+                        (ar.name || ' - ' || a.name) as display_name
+                    FROM albums a
+                    LEFT JOIN artists ar ON a.artist_id = ar.id
+                    WHERE a.name IS NOT NULL AND a.name != ''
+                    AND ar.name IS NOT NULL AND ar.name != ''
+                    ORDER BY a.id
+                    LIMIT 5
+                """
+                sample_albums = self.db_manager.execute_query(sample_query)
+                
+                # Test de búsqueda simple
+                search_query = """
+                    SELECT a.id, a.name, ar.name as artist_name,
+                        (ar.name || ' - ' || a.name) as display_name
+                    FROM albums a
+                    LEFT JOIN artists ar ON a.artist_id = ar.id
+                    WHERE (a.name LIKE '%a%' OR ar.name LIKE '%a%')
+                    AND a.name IS NOT NULL AND a.name != ''
+                    AND ar.name IS NOT NULL AND ar.name != ''
+                    LIMIT 5
+                """
+                search_results = self.db_manager.execute_query(search_query)
+                
+                return jsonify({
+                    'status': 'ok',
+                    'total_albums': total_albums,
+                    'sample_albums': [dict(row) for row in sample_albums],
+                    'search_test': [dict(row) for row in search_results],
+                    'db_path': getattr(self.db_manager, 'db_path', 'Unknown'),
+                    'db_exists': os.path.exists(self.db_manager.db_path) if hasattr(self.db_manager, 'db_path') else 'Unknown'
+                })
+                
+            except Exception as e:
+                logger.error(f"Error en debug de álbumes: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'error': str(e),
+                    'status': 'error',
+                    'traceback': traceback.format_exc()
+                }), 500
+    
+    
+
+
+
+    def _get_album_time_analysis(self, album_id):
         """Análisis temporal del álbum"""
         try:
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+
             album_year = album.get('year')
             if not album_year:
                 return {'error': 'El álbum no tiene año definido'}
@@ -201,9 +303,13 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis temporal del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_genre_analysis(self, album_id, album):
+    def _get_album_genre_analysis(self, album_id):
         """Análisis de género del álbum"""
         try:
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             album_genre = album.get('genre')
             if not album_genre:
                 return {'error': 'El álbum no tiene género definido'}
@@ -281,9 +387,14 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de género del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_concerts_analysis(self, album_id, album):
+    def _get_album_concerts_analysis(self, album_id):
         """Análisis de conciertos del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             artist_id = album.get('artist_id')
             album_name = album.get('name', '')
             
@@ -394,9 +505,14 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de conciertos del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_labels_analysis(self, album_id, album):
+    def _get_album_labels_analysis(self, album_id):
         """Análisis de sellos del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             album_label = album.get('label')
             if not album_label:
                 return {'error': 'El álbum no tiene sello definido'}
@@ -491,9 +607,14 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de sellos del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_discography_analysis(self, album_id, album):
+    def _get_album_discography_analysis(self, album_id):
         """Análisis de discografía del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             artist_id = album.get('artist_id')
             album_name = album.get('name', '')
             
@@ -578,9 +699,14 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de discografía del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_listens_analysis(self, album_id, album):
+    def _get_album_listens_analysis(self, album_id):
         """Análisis de escuchas del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             artist_id = album.get('artist_id')
             album_name = album.get('name', '')
             
@@ -679,11 +805,16 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de escuchas del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_collaborators_analysis(self, album_id, album):
+    def _get_album_collaborators_analysis(self, album_id):
         """Análisis de colaboradores del álbum"""
         try:
-            album_name = album.get('name', '')
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             artist_id = album.get('artist_id')
+            album_name = album.get('name', '')
             
             # Obtener colaboradores del álbum actual
             album_collaborators = self._extract_album_collaborators(album)
@@ -774,9 +905,14 @@ class AlbumAnalysisEndpoints:
         # Filtrar colaboradores válidos
         return [c for c in collaborators if c and len(c) > 2]
     
-    def _get_album_feeds_analysis(self, album_id, album):
+    def _get_album_feeds_analysis(self, album_id):
         """Análisis de feeds del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             artist_id = album.get('artist_id')
             album_name = album.get('name', '')
             
@@ -852,9 +988,14 @@ class AlbumAnalysisEndpoints:
             logger.error(f"Error en análisis de feeds del álbum: {e}")
             return {'error': str(e)}
     
-    def _get_album_lyrics_analysis(self, album_id, album):
+    def _get_album_lyrics_analysis(self, album_id):
         """Análisis de letras del álbum"""
         try:
+            # Obtener el álbum primero
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+                
             album_name = album.get('name', '')
             
             # Obtener letras de las canciones del álbum

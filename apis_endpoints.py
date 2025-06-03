@@ -3137,3 +3137,4 @@ class APIEndpoints:
         except Exception as e:
             logger.error(f"Error en análisis de feeds: {e}")
             return {'error': str(e)}
+            
