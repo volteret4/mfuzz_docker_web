@@ -4,7 +4,7 @@
 import os
 import yaml
 import logging
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, redirect
 from werkzeug.exceptions import NotFound
 import configparser
 
@@ -24,6 +24,7 @@ try:
     from telegram_notifier import create_notifier
     from template_routes import TemplateRoutes
     from album_analysis_endpoint import AlbumAnalysisEndpoints
+    from scrobbles_analysis_endpoint import ScrobblesAnalysisEndpoints
 except ImportError as e:
     logger.error(f"Error importando módulos: {e}")
     raise
@@ -48,6 +49,8 @@ class MusicWebExplorer:
             self.db_manager, 
             self.config
         )
+        self.scrobbles_endpoints = ScrobblesAnalysisEndpoints(self.app, self.db_manager, self.config)
+
         # Configurar rutas
         self.setup_routes()
         

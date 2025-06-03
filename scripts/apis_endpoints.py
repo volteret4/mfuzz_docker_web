@@ -382,16 +382,63 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
-                lyrics = self.db_manager.get_song_lyrics_by_id(song_id)
-                if not lyrics:
-                    return jsonify({'error': 'Letras no encontradas'}), 404
                 
-                return jsonify({'lyrics': lyrics})
+                # Buscar letras en la BD (ajusta según tu esquema)
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.execute("SELECT lyrics FROM songs WHERE id = ?", (song_id,))
+                    result = cursor.fetchone()
+                    
+                if not result or not result['lyrics']:
+                    return jsonify({'error': 'No se encontraron letras para esta canción'}), 404
+                    
+                return jsonify({'lyrics': result['lyrics']})
+                
             except Exception as e:
-                logger.error(f"Error obteniendo letras de la canción {song_id}: {e}")
+                logger.error(f"Error obteniendo letras de canción {song_id}: {e}")
                 return jsonify({'error': str(e)}), 500
         
+
+        @self.app.route('/api/images/track/<int:track_id>')
+        def api_get_track_image(track_id):
+            """Obtener imagen de una canción (usa la del álbum)"""
+            try:
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+                
+                # Obtener album_id de la canción
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.execute("SELECT album_id FROM songs WHERE id = ?", (track_id,))
+                    result = cursor.fetchone()
+                    
+                if not result or not result['album_id']:
+                    return '', 404
+                    
+                # Redirigir a la imagen del álbum
+                return redirect(f'/api/images/album/{result["album_id"]}')
+                
+            except Exception as e:
+                logger.error(f"Error obteniendo imagen de canción {track_id}: {e}")
+                return '', 500
+
+        @self.app.route('/static/images/<path:filename>')
+        def serve_default_images(filename):
+            """Servir imágenes por defecto"""
+            # Crear un placeholder SVG simple si no existe la imagen
+            if filename.endswith('_default.jpg'):
+                svg_content = '''
+                <svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="200" height="200" fill="#2a5298"/>
+                    <text x="100" y="100" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dy=".3em">
+                        Sin imagen
+                    </text>
+                </svg>
+                '''
+                from flask import Response
+                return Response(svg_content, mimetype='image/svg+xml')
+            
+            return '', 404
+
+
         # === DESCARGAS ===
         @self.app.route('/api/download/album/<int:album_id>', methods=['POST'])
         def api_download_album(album_id):

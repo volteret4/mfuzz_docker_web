@@ -879,27 +879,35 @@
                 
                 return `
                     <div class="track-list">
-                        ${tracks.map(track => `
-                            <div class="track-item" onclick="app.showTrack(${track.id})">
-                                <div class="track-number">${track.track_number || '?'}</div>
-                                <div class="track-info">
-                                    <div class="track-title">${track.title}</div>
-                                    <div class="track-duration">
-                                        ${track.artist} - ${track.album}
-                                        ${track.duration ? window.formatDuration(track.duration) : ''}
+                        ${tracks.map(track => {
+                            // Usar los campos exactos de tu BD
+                            const trackId = track.id;
+                            const trackNumber = track.track_number || track.track_num || '?';
+                            const artist = track.artist || 'Artista desconocido';
+                            const album = track.album || track.album_name || 'Álbum desconocido';
+                            const title = track.title || 'Título desconocido';
+                            
+                            return `
+                                <div class="track-item" onclick="app.showTrack(${trackId})">
+                                    <div class="track-number">${trackNumber}</div>
+                                    <div class="track-info">
+                                        <div class="track-title">${title}</div>
+                                        <div class="track-duration">
+                                            ${artist} - ${album}
+                                            ${track.duration ? window.formatDuration(track.duration) : ''}
+                                        </div>
+                                    </div>
+                                    <div class="track-actions">
+                                        <button class="btn btn-secondary" onclick="event.stopPropagation(); app.showLyrics(${trackId})">
+                                            <i class="fas fa-quote-right"></i> Letras
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="track-actions">
-                                    <button class="btn btn-secondary" onclick="event.stopPropagation(); app.showLyrics(${track.id})">
-                                        <i class="fas fa-quote-right"></i> Letras
-                                    </button>
-                                </div>
-                            </div>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </div>
                 `;
             }
-
         // === NAVEGACIÓN DE CONTENIDO ===
 
             async showArtist(artistId) {
@@ -1464,11 +1472,17 @@
                     const data = await response.json();
                     
                     if (data.error) {
-                        window.showError('Error cargando información de la canción');
+                        window.showError(`Error: ${data.error}`);
                         return;
                     }
                     
-                    this.renderTrackPage(data.track);
+                    // Tu API devuelve {'song': song}, no {'track': track}
+                    if (!data.song) {
+                        window.showError('No se encontraron datos de la canción');
+                        return;
+                    }
+                    
+                    this.renderTrackPage(data.song); // Usar data.song en lugar de data.track
                     
                 } catch (error) {
                     console.error('Error cargando canción:', error);
@@ -1477,6 +1491,29 @@
             }
 
             renderTrackPage(track) {
+                console.log('🎨 Renderizando página de canción:', track);
+                
+                if (!track) {
+                    console.error('❌ renderTrackPage llamado sin datos de canción');
+                    window.showError('Error: No hay datos de la canción para mostrar');
+                    return;
+                }
+                
+                // Usar los campos exactos de tu estructura de BD
+                const trackInfo = {
+                    id: track.id,
+                    title: track.title || 'Título desconocido',
+                    artist: track.artist || 'Artista desconocido',
+                    album: track.album || track.album_name || 'Álbum desconocido',
+                    duration: track.duration || null,
+                    track_number: track.track_number || track.track_num || null,
+                    year: track.year || null,
+                    album_id: track.album_id || null,
+                    artist_id: track.artist_id || null
+                };
+                
+                console.log('🎵 Información procesada de la canción:', trackInfo);
+                
                 const content = `
                     <button class="back-btn" onclick="app.goBack()">
                         <i class="fas fa-arrow-left"></i> Volver
@@ -1484,23 +1521,40 @@
                     
                     <div class="artist-info">
                         <div class="artist-image">
-                            <img src="/api/images/track/${track.id}" 
-                                alt="${track.title}" 
-                                onerror="this.src='/static/images/track_default.jpg'">
+                            <!-- Usar imagen del álbum en lugar del track -->
+                            ${trackInfo.album_id ? 
+                                `<img src="/api/images/album/${trackInfo.album_id}" 
+                                    alt="${trackInfo.album}" 
+                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div style="display: none; width: 100%; height: 100%; background: rgba(255,255,255,0.1); align-items: center; justify-content: center; border-radius: 10px;">
+                                    <i class="fas fa-music" style="font-size: 3rem; color: rgba(255,255,255,0.3);"></i>
+                                </div>` :
+                                `<div style="width: 100%; height: 100%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; border-radius: 10px;">
+                                    <i class="fas fa-music" style="font-size: 3rem; color: rgba(255,255,255,0.3);"></i>
+                                </div>`
+                            }
                         </div>
                         <div class="artist-details">
-                            <h2>${track.title}</h2>
-                            <p class="card-subtitle">${track.artist} - ${track.album}</p>
-                            ${track.duration ? `<p><strong>Duración:</strong> ${window.formatDuration(track.duration)}</p>` : ''}
-                            ${track.track_number ? `<p><strong>Track:</strong> ${track.track_number}</p>` : ''}
-                            ${track.year ? `<p><strong>Año:</strong> ${track.year}</p>` : ''}
+                            <h2>${trackInfo.title}</h2>
+                            <p class="card-subtitle">${trackInfo.artist} - ${trackInfo.album}</p>
+                            ${trackInfo.duration ? `<p><strong>Duración:</strong> ${window.formatDuration(trackInfo.duration)}</p>` : ''}
+                            ${trackInfo.track_number ? `<p><strong>Track:</strong> ${trackInfo.track_number}</p>` : ''}
+                            ${trackInfo.year ? `<p><strong>Año:</strong> ${trackInfo.year}</p>` : ''}
                             
                             <div class="artist-links">
-                                <button class="btn" onclick="app.showLyrics(${track.id})">
+                                <button class="btn" onclick="app.showLyrics(${trackInfo.id})">
                                     <i class="fas fa-quote-right"></i> Ver Letras
                                 </button>
-                                ${track.spotify_url ? `<a href="${track.spotify_url}" target="_blank" class="link-btn"><i class="fab fa-spotify"></i> Spotify</a>` : ''}
-                                ${track.youtube_url ? `<a href="${track.youtube_url}" target="_blank" class="link-btn"><i class="fab fa-youtube"></i> YouTube</a>` : ''}
+                                ${trackInfo.artist_id ? 
+                                    `<button class="btn btn-secondary" onclick="app.showArtist(${trackInfo.artist_id})">
+                                        <i class="fas fa-user"></i> Ver Artista
+                                    </button>` : ''
+                                }
+                                ${trackInfo.album_id ? 
+                                    `<button class="btn btn-secondary" onclick="app.showAlbum(${trackInfo.album_id})">
+                                        <i class="fas fa-compact-disc"></i> Ver Álbum
+                                    </button>` : ''
+                                }
                             </div>
                         </div>
                     </div>
