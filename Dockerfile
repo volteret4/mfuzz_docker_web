@@ -33,8 +33,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/nginx.conf /etc/nginx/sites-available/default
-COPY app.py db_manager.py download_manager.py artist_analyzer.py apis_endpoints.py img_manager.py stats_manager.py telegram_notifier.py config.yml /app/
-COPY templates/index.html templates/sistema.html /app/
+COPY app.py db_manager.py download_manager.py artist_analyzer.py apis_endpoints.py img_manager.py stats_manager.py album_analysis_endpoint.py template_routes.py telegram_notifier.py config.yml /app/
+COPY templates/index.html templates/sistema.html templates/album_analysis.html /app/
 
 
 

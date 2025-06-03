@@ -215,6 +215,29 @@ class APIEndpoints:
                 </html>
                 ''', 500
 
+        # @self.app.route('/album_analysis.html')
+        # def album_analysis():
+        #     """Página de análisis de álbumes"""
+        #     try:
+        #         return render_template('album_analysis.html', config=self.config)
+        #     except Exception as e:
+        #         logger.error(f"Error renderizando album_analysis.html: {e}")
+        #         # Template embebido básico en caso de error
+        #         return '''
+        #         <!DOCTYPE html>
+        #         <html lang="es">
+        #         <head>
+        #             <meta charset="UTF-8">
+        #             <title>Análisis de Álbumes - Music Web Explorer</title>
+        #             <style>body { font-family: Arial, sans-serif; margin: 20px; }</style>
+        #         </head>
+        #         <body>
+        #             <h1>Análisis de Álbumes - Music Web Explorer</h1>
+        #             <p>Error cargando template album_analysis.html: ''' + str(e) + '''</p>
+        #             <p><a href="/">← Volver al inicio</a></p>
+        #         </body>
+        #         </html>
+        #         ''', 500
 
 
         # === BÚSQUEDAS ===

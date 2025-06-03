@@ -22,6 +22,8 @@ try:
     from apis_endpoints import APIEndpoints
     from img_manager import ImageManager
     from telegram_notifier import create_notifier
+    from template_routes import TemplateRoutes
+    from album_analysis_endpoint import AlbumAnalysisEndpoints
 except ImportError as e:
     logger.error(f"Error importando módulos: {e}")
     raise
@@ -40,7 +42,12 @@ class MusicWebExplorer:
         self.db_manager = DatabaseManager(self.config)
         self.img_manager = ImageManager(self.config)
         self.telegram_notifier = self.create_telegram_notifier()
-        
+        self.template_routes = TemplateRoutes(self.app, self.config)
+        self.album_analysis_endpoints = AlbumAnalysisEndpoints(
+            self.app, 
+            self.db_manager, 
+            self.config
+        )
         # Configurar rutas
         self.setup_routes()
         

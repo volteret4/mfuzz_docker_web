@@ -512,7 +512,10 @@
                 <i class="fas fa-exclamation-triangle"></i> Datos Faltantes
             </button>
             <button class="stats-tab" onclick="showStatsCategory('artist-analysis')">
-                <i class="fas fa-chart-line"></i> Análisis Detallado
+                <i class="fas fa-chart-line"></i> Análisis Artistas
+            </button>
+            <button class="stats-tab" onclick="showStatsCategory('album-analysis')">
+                <i class="fas fa-compact-disc"></i> Análisis Álbumes
             </button>
         </div>
 
@@ -640,7 +643,6 @@
             currentView = 'artist-detail';
         }
 
-        // NUEVA FUNCIÓN: Volver a las pestañas principales
         function returnToMainTabs() {
             const tabsContainer = document.getElementById('main-tabs');
             tabsContainer.innerHTML = `
@@ -660,11 +662,15 @@
                     <i class="fas fa-exclamation-triangle"></i> Datos Faltantes
                 </button>
                 <button class="stats-tab" onclick="showStatsCategory('artist-analysis')">
-                    <i class="fas fa-chart-line"></i> Análisis Detallado
+                    <i class="fas fa-chart-line"></i> Análisis Artistas
+                </button>
+                <button class="stats-tab" onclick="showStatsCategory('album-analysis')">
+                    <i class="fas fa-compact-disc"></i> Análisis Álbumes
                 </button>
             `;
             currentView = 'main';
             currentArtistId = null;
+            currentAlbumId = null; // Añadir esta línea
             
             // Volver a mostrar estadísticas de artistas por defecto
             showStatsCategory('artists');
@@ -679,6 +685,31 @@
             
             const statsContent = document.getElementById('stats-content');
             if (!statsContent) return;
+            
+            // NUEVO: Manejar redirección a análisis de álbumes
+            if (category === 'album-analysis') {
+                statsContent.innerHTML = `
+                    <div style="text-align: center; padding: 60px; background: rgba(255,255,255,0.05); border-radius: 20px;">
+                        <i class="fas fa-compact-disc" style="font-size: 4rem; margin-bottom: 20px; display: block; color: #a8e6cf;"></i>
+                        <h3 style="color: #a8e6cf; margin-bottom: 15px;">Análisis de Álbumes</h3>
+                        <p style="margin-bottom: 25px;">Redirigiendo a la página de análisis detallado de álbumes...</p>
+                        <div class="loading" style="margin: 20px 0;">
+                            <i class="fas fa-spinner"></i>
+                        </div>
+                    </div>
+                `;
+                
+                // Redirigir después de 1.5 segundos
+                setTimeout(() => {
+                    window.open('/album_analysis.html', '_blank');
+                    
+                    // Volver a la pestaña anterior después de abrir
+                    setTimeout(() => {
+                        showStatsCategory('artists'); // O la pestaña que prefieras por defecto
+                    }, 500);
+                }, 1500);
+                return;
+            }
             
             statsContent.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i><p>Cargando estadísticas...</p></div>';
             
@@ -732,6 +763,41 @@
             await loadArtistsList();
             setupArtistSearchEvents();
         }
+
+        async function showAlbumAnalysis(container) {
+            container.innerHTML = `
+                <div class="stats-section">
+                    <h2>Análisis de Álbumes</h2>
+                    
+                    <!-- Selector de álbumes -->
+                    <div style="background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #a8e6cf; margin-bottom: 15px;">Seleccionar Álbum</h3>
+                        <div style="position: relative;">
+                            <input type="text" id="albumSearchInput" 
+                                style="width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; background: rgba(255,255,255,0.1); color: white; outline: none;"
+                                placeholder="Buscar álbum (ej: Pink Floyd - Dark Side)..." autocomplete="off">
+                            <div id="albumDropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: rgba(42,82,152,0.95); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; max-height: 200px; overflow-y: auto; margin-top: 5px; z-index: 1000; backdrop-filter: blur(10px);"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Mensaje inicial -->
+                    <div id="albumInitialMessage" style="text-align: center; padding: 40px; color: #a8e6cf;">
+                        <i class="fas fa-compact-disc" style="font-size: 3rem; margin-bottom: 20px; display: block;"></i>
+                        <p>Selecciona un álbum para ver su análisis detallado</p>
+                        <p><small>Escribe el nombre del artista o álbum para comenzar</small></p>
+                    </div>
+                    
+                    <!-- Contenido del álbum seleccionado -->
+                    <div id="selectedAlbumContent" style="display: none;">
+                        <!-- Se carga dinámicamente -->
+                    </div>
+                </div>
+            `;
+            
+            // Configurar eventos del buscador de álbumes
+            setupAlbumSearchEvents();
+        }
+
 
         async function showCategoryStats(category, container) {
             const response = await fetch(`/api/stats/${category}`);
@@ -1503,16 +1569,26 @@
         function setupGlobalEvents() {
             // Configurar eventos de clic fuera del dropdown
             document.addEventListener('click', (e) => {
-                const dropdown = document.getElementById('artistDropdown');
-                if (dropdown && !e.target.closest('#artistSearchInput') && !e.target.closest('#artistDropdown')) {
-                    dropdown.style.display = 'none';
+                const artistDropdown = document.getElementById('artistDropdown');
+                const albumDropdown = document.getElementById('albumDropdown');
+                
+                if (artistDropdown && !e.target.closest('#artistSearchInput') && !e.target.closest('#artistDropdown')) {
+                    artistDropdown.style.display = 'none';
+                }
+                
+                if (albumDropdown && !e.target.closest('#albumSearchInput') && !e.target.closest('#albumDropdown')) {
+                    albumDropdown.style.display = 'none';
                 }
             });
             
             // Debug: Verificar que los eventos se están configurando
-            console.log('🔧 Eventos globales configurados');
+            console.log('🔧 Eventos globales configurados (incluyendo álbumes)');
         }
-        
+
+
+
+
+
         // Configurar eventos globales al cargar
         setupGlobalEvents();
 
