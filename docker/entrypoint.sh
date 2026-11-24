@@ -22,6 +22,7 @@ fi
 if [ -f "/app/index.html" ] && [ ! -f "/app/templates/index.html" ]; then
     log "Copiando index.html a templates..."
     cp /app/index.html /app/templates/
+    cp /app/favicon.ico /app/static/images/favicon.ico
 fi
 
 # Copiar sistema.html a templates si existe en /app/
@@ -174,23 +175,23 @@ class TelegramNotifier:
     def __init__(self, enabled=False, bot_token=None, chat_id=None):
         self.enabled = enabled
         logger.info(f"TelegramNotifier {'habilitado' if enabled else 'deshabilitado'}")
-    
+
     def notify_download_started(self, album_name, artist_name, user_ip, source):
         if self.enabled:
             logger.info(f"[TELEGRAM] Download started: {artist_name} - {album_name}")
-    
+
     def notify_download_completed(self, album_name, artist_name, file_count, file_path, source):
         if self.enabled:
             logger.info(f"[TELEGRAM] Download completed: {artist_name} - {album_name}")
-    
+
     def notify_download_error(self, album_name, artist_name, error_message):
         if self.enabled:
             logger.info(f"[TELEGRAM] Download error: {artist_name} - {album_name}")
-    
+
     def notify_album_extracted(self, album_name, artist_name, extract_path, file_count):
         if self.enabled:
             logger.info(f"[TELEGRAM] Album extracted: {artist_name} - {album_name}")
-    
+
     def notify_file_auto_deleted(self, album_name, artist_name, file_path):
         if self.enabled:
             logger.info(f"[TELEGRAM] File auto-deleted: {artist_name} - {album_name}")
@@ -222,14 +223,14 @@ class StatsManager:
         self.db_path = db_path
         self.config = config or {}
         logger.info("StatsManager básico inicializado")
-    
+
     def get_system_overview(self) -> Dict[str, Any]:
         return {
             'database': {'size_mb': 0, 'total_tables': 0, 'last_updated': '2024-01-01'},
             'content': {'total_artists': 0, 'total_albums': 0, 'total_songs': 0, 'total_duration_hours': 0},
             'completeness': 0
         }
-    
+
     def get_database_info(self) -> Dict[str, Any]:
         return {
             'tables': {},
@@ -237,14 +238,14 @@ class StatsManager:
             'total_tables': 0,
             'last_updated': '2024-01-01'
         }
-    
+
     def get_artists_stats(self) -> Dict[str, Any]:
         return {
             'total_artists': 0,
             'by_country': [],
             'top_artists': []
         }
-    
+
     def get_albums_stats(self) -> Dict[str, Any]:
         return {
             'total_albums': 0,
@@ -252,7 +253,7 @@ class StatsManager:
             'by_genre': [],
             'by_label': []
         }
-    
+
     def get_songs_stats(self) -> Dict[str, Any]:
         return {
             'total_songs': 0,
@@ -260,10 +261,10 @@ class StatsManager:
             'duration_stats': {},
             'lyrics_stats': {}
         }
-    
+
     def get_missing_data_stats(self) -> Dict[str, Any]:
         return {}
-    
+
     def get_chart_data_for_frontend(self, chart_type: str, category: str) -> Dict[str, Any]:
         return {
             'chart': '{"data": [], "layout": {"title": "No data available"}}',
@@ -302,26 +303,26 @@ class ImageManager:
         self.config = config
         self.images_dir = config.get('paths', {}).get('images', '/app/images')
         logger.info("ImageManager básico inicializado")
-        
+
         # Crear directorios necesarios
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs('/app/static/images', exist_ok=True)
-    
+
     def get_artist_image(self, artist_id: int) -> Optional[str]:
         return self.get_default_artist_image()
-    
+
     def get_album_image(self, album_id: int) -> Optional[str]:
         return self.get_default_album_image()
-    
+
     def get_default_artist_image(self) -> str:
         return "/app/static/images/default_album.jpg"
-    
+
     def get_default_album_image(self) -> str:
         return "/app/static/images/default_album.jpg"
-    
+
     def clear_cache(self, category: str = None) -> bool:
         return True
-    
+
     def get_cache_stats(self) -> dict:
         return {'artists': 0, 'albums': 0, 'total_size_mb': 0}
 EOF
@@ -340,26 +341,26 @@ class ImageManager:
         self.config = config
         self.images_dir = config.get('paths', {}).get('images', '/app/images')
         logger.info("ImageManager básico inicializado")
-        
+
         # Crear directorios necesarios
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs('/app/static/images', exist_ok=True)
-    
+
     def get_artist_image(self, artist_id: int) -> Optional[str]:
         return self.get_default_artist_image()
-    
+
     def get_album_image(self, album_id: int) -> Optional[str]:
         return self.get_default_album_image()
-    
+
     def get_default_artist_image(self) -> str:
         return "/app/static/images/default_album.jpg"
-    
+
     def get_default_album_image(self) -> str:
         return "/app/static/images/default_album.jpg"
-    
+
     def clear_cache(self, category: str = None) -> bool:
         return True
-    
+
     def get_cache_stats(self) -> dict:
         return {'artists': 0, 'albums': 0, 'total_size_mb': 0}
 EOF
@@ -378,20 +379,20 @@ try:
     print('Testing basic imports...')
     import flask
     print('✓ Flask imported')
-    import yaml  
+    import yaml
     print('✓ PyYAML imported')
     import sqlite3
     print('✓ SQLite3 imported')
     import os
     print('✓ OS imported')
-    
+
     print('Testing app import...')
     from app import create_app
     print('✓ App module imported')
-    
+
     app = create_app()
     print('✓ Flask app created successfully')
-    
+
 except Exception as e:
     print(f'❌ Error: {e}')
     traceback.print_exc()

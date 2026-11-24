@@ -23,7 +23,7 @@ except ImportError as e:
 
 class APIEndpoints:
     """Maneja todos los endpoints de la API REST"""
-    
+
     def __init__(self, app, db_manager, img_manager, telegram_notifier, config):
         self.app = app
         self.db_manager = db_manager
@@ -31,42 +31,42 @@ class APIEndpoints:
         self.telegram_notifier = telegram_notifier
         self.config = config
         self.download_manager = DownloadManager(config)
-        
+
         # Registro de descargas activas
         self.active_downloads = {}
         self.download_cleanup_interval = 3600  # 1 hora
         self.scheduled_deletions = {}
-        
+
         # Configurar rutas de API
         self.setup_api_routes()
-        
+
         # Programar limpieza de descargas antiguas
         self._schedule_cleanup()
         self._schedule_auto_deletion()
-    
+
     def _schedule_cleanup(self):
         """Programa la limpieza de descargas antiguas"""
         import threading
-        
+
         def cleanup_worker():
             while True:
                 try:
                     current_time = time.time()
                     expired_downloads = []
-                    
+
                     for download_id, info in self.active_downloads.items():
                         # Limpiar descargas de más de 1 hora
                         if current_time - info.get('started_at', 0) > self.download_cleanup_interval:
                             expired_downloads.append(download_id)
-                    
+
                     for download_id in expired_downloads:
                         self._cleanup_download(download_id)
-                    
+
                     time.sleep(300)  # Verificar cada 5 minutos
                 except Exception as e:
                     logger.error(f"Error en limpieza de descargas: {e}")
                     time.sleep(60)
-        
+
         cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
         cleanup_thread.start()
 
@@ -75,48 +75,48 @@ class APIEndpoints:
         try:
             if download_id in self.active_downloads:
                 download_info = self.active_downloads[download_id]
-                
+
                 # Eliminar archivo si existe y la descarga está completada hace más de 1 hora
                 if download_info.get('status') == 'completed':
                     file_path = download_info.get('file_path')
                     completed_at = download_info.get('completed_at', 0)
-                    
+
                     if file_path and os.path.exists(file_path) and time.time() - completed_at > 3600:
                         os.remove(file_path)
                         logger.info(f"Archivo de descarga eliminado: {file_path}")
-                
+
                 # Eliminar del registro
                 del self.active_downloads[download_id]
                 logger.debug(f"Descarga {download_id} limpiada del registro")
-                
+
         except Exception as e:
             logger.error(f"Error limpiando descarga {download_id}: {e}")
 
     def _schedule_auto_deletion(self):
         """Programa borrados automáticos de archivos ZIP"""
         import threading
-        
+
         def deletion_worker():
             while True:
                 try:
                     current_time = time.time()
                     files_to_delete = []
-                    
+
                     # Verificar archivos programados para borrado
                     for download_id, deletion_info in list(self.scheduled_deletions.items()):
                         if current_time >= deletion_info['delete_at']:
                             files_to_delete.append(download_id)
-                    
+
                     # Ejecutar borrados
                     for download_id in files_to_delete:
                         self._execute_scheduled_deletion(download_id)
-                    
+
                     time.sleep(10)  # Verificar cada 10 segundos
-                    
+
                 except Exception as e:
                     logger.error(f"Error en worker de borrado automático: {e}")
                     time.sleep(30)
-        
+
         deletion_thread = threading.Thread(target=deletion_worker, daemon=True)
         deletion_thread.start()
 
@@ -125,14 +125,14 @@ class APIEndpoints:
         try:
             if download_id not in self.scheduled_deletions:
                 return
-            
+
             deletion_info = self.scheduled_deletions[download_id]
             file_path = deletion_info['file_path']
-            
+
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"Archivo ZIP borrado automáticamente: {file_path}")
-                
+
                 # Notificar borrado
                 try:
                     album_name = deletion_info.get('album_name', 'Desconocido')
@@ -140,15 +140,15 @@ class APIEndpoints:
                     self.telegram_notifier.notify_file_auto_deleted(album_name, artist_name, file_path)
                 except Exception as e:
                     logger.warning(f"Error notificando borrado automático: {e}")
-            
+
             # Actualizar estado en active_downloads si existe
             if download_id in self.active_downloads:
                 self.active_downloads[download_id]['zip_auto_deleted'] = True
                 self.active_downloads[download_id]['auto_deleted_at'] = time.time()
-            
+
             # Remover de programación
             del self.scheduled_deletions[download_id]
-            
+
         except Exception as e:
             logger.error(f"Error ejecutando borrado programado para {download_id}: {e}")
 
@@ -158,16 +158,16 @@ class APIEndpoints:
             if download_id not in self.active_downloads:
                 logger.warning(f"No se puede programar borrado para descarga inexistente: {download_id}")
                 return
-            
+
             download_info = self.active_downloads[download_id]
             file_path = download_info.get('file_path')
-            
+
             if not file_path or not os.path.exists(file_path):
                 logger.warning(f"No se puede programar borrado, archivo no existe: {file_path}")
                 return
-            
+
             delete_at = time.time() + delay_seconds
-            
+
             self.scheduled_deletions[download_id] = {
                 'file_path': file_path,
                 'delete_at': delete_at,
@@ -176,21 +176,21 @@ class APIEndpoints:
                 'scheduled_at': time.time(),
                 'delay_seconds': delay_seconds
             }
-            
+
             # Actualizar info de descarga
             download_info['auto_delete_scheduled'] = True
             download_info['auto_delete_at'] = delete_at
-            
+
             logger.info(f"Programado borrado automático de {file_path} en {delay_seconds} segundos")
-            
+
         except Exception as e:
             logger.error(f"Error programando borrado de ZIP: {e}")
-    
+
     def setup_api_routes(self):
         """Configura todas las rutas de la API"""
-        
 
-        
+
+
         @self.app.route('/sistema.html')
         def sistema():
             """Página de estadísticas completas"""
@@ -246,41 +246,41 @@ class APIEndpoints:
             """Buscar artistas"""
             query = request.args.get('q', '').strip()
             limit = min(int(request.args.get('limit', 50)), 100)
-            
+
             if len(query) < 2:
                 return jsonify({'error': 'Consulta muy corta', 'results': []})
-            
+
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
-                    
+
                 results = self.db_manager.search_artists(query, limit)
                 self.db_manager.add_recent_search(query)
                 return jsonify({'results': results, 'total': len(results)})
             except Exception as e:
                 logger.error(f"Error en búsqueda de artistas: {e}")
                 return jsonify({'error': str(e), 'results': []}), 500
-        
+
         @self.app.route('/api/search/global')
         def api_search_global():
             """Búsqueda global en toda la base de datos"""
             query = request.args.get('q', '').strip()
             limit = min(int(request.args.get('limit', 25)), 50)
-            
+
             if len(query) < 2:
                 return jsonify({'error': 'Consulta muy corta', 'results': {}})
-            
+
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible', 'results': {}}), 500
-                    
+
                 results = self.db_manager.search_global(query, limit)
                 self.db_manager.add_recent_search(query)
                 return jsonify({'results': results})
             except Exception as e:
                 logger.error(f"Error en búsqueda global: {e}")
                 return jsonify({'error': str(e), 'results': {}}), 500
-        
+
         # === ARTISTAS ===
         @self.app.route('/api/artists/<int:artist_id>')
         def api_get_artist(artist_id):
@@ -288,33 +288,33 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 artist = self.db_manager.get_artist_by_id(artist_id)
                 if not artist:
                     return jsonify({'error': 'Artista no encontrado'}), 404
-                
+
                 return jsonify({'artist': artist})
             except Exception as e:
                 logger.error(f"Error obteniendo artista {artist_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/artists/<int:artist_id>/albums')
         def api_get_artist_albums(artist_id):
             """Obtener álbumes de un artista"""
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 artist = self.db_manager.get_artist_by_id(artist_id)
                 if not artist:
                     return jsonify({'error': 'Artista no encontrado'}), 404
-                
+
                 albums = self.db_manager.get_artist_albums_by_id(artist_id)
                 return jsonify({'albums': albums, 'total': len(albums)})
             except Exception as e:
                 logger.error(f"Error obteniendo álbumes del artista {artist_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/artists/popular')
         def api_get_popular_artists():
             """Obtener artistas más populares"""
@@ -322,13 +322,13 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 artists = self.db_manager.get_popular_artists(limit)
                 return jsonify({'artists': artists, 'total': len(artists)})
             except Exception as e:
                 logger.error(f"Error obteniendo artistas populares: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         # === ÁLBUMES ===
         @self.app.route('/api/albums/<int:album_id>')
         def api_get_album(album_id):
@@ -336,29 +336,29 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
-                
+
                 return jsonify({'album': album})
             except Exception as e:
                 logger.error(f"Error obteniendo álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/albums/<int:album_id>/tracks')
         def api_get_album_tracks(album_id):
             """Obtener canciones de un álbum"""
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 tracks = self.db_manager.get_album_tracks_by_id(album_id)
                 return jsonify({'tracks': tracks, 'total': len(tracks)})
             except Exception as e:
                 logger.error(f"Error obteniendo canciones del álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         # === CANCIONES ===
         @self.app.route('/api/songs/<int:song_id>')
         def api_get_song(song_id):
@@ -366,37 +366,37 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 song = self.db_manager.get_song_by_id(song_id)
                 if not song:
                     return jsonify({'error': 'Canción no encontrada'}), 404
-                
+
                 return jsonify({'song': song})
             except Exception as e:
                 logger.error(f"Error obteniendo canción {song_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/songs/<int:song_id>/lyrics')
         def api_get_song_lyrics(song_id):
             """Obtener letras de una canción"""
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                
+
                 # Buscar letras en la BD (ajusta según tu esquema)
                 with self.db_manager.get_connection() as conn:
                     cursor = conn.execute("SELECT lyrics FROM songs WHERE id = ?", (song_id,))
                     result = cursor.fetchone()
-                    
+
                 if not result or not result['lyrics']:
                     return jsonify({'error': 'No se encontraron letras para esta canción'}), 404
-                    
+
                 return jsonify({'lyrics': result['lyrics']})
-                
+
             except Exception as e:
                 logger.error(f"Error obteniendo letras de canción {song_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
 
         @self.app.route('/api/images/track/<int:track_id>')
         def api_get_track_image(track_id):
@@ -404,18 +404,18 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                
+
                 # Obtener album_id de la canción
                 with self.db_manager.get_connection() as conn:
                     cursor = conn.execute("SELECT album_id FROM songs WHERE id = ?", (track_id,))
                     result = cursor.fetchone()
-                    
+
                 if not result or not result['album_id']:
                     return '', 404
-                    
+
                 # Redirigir a la imagen del álbum
                 return redirect(f'/api/images/album/{result["album_id"]}')
-                
+
             except Exception as e:
                 logger.error(f"Error obteniendo imagen de canción {track_id}: {e}")
                 return '', 500
@@ -435,7 +435,7 @@ class APIEndpoints:
                 '''
                 from flask import Response
                 return Response(svg_content, mimetype='image/svg+xml')
-            
+
             return '', 404
 
 
@@ -445,26 +445,26 @@ class APIEndpoints:
             """Iniciar descarga de álbum - VERSIÓN DUAL (local/SSH)"""
             try:
                 logger.info(f"Solicitud de descarga para álbum ID: {album_id}")
-                
+
                 # Obtener información del álbum incluyendo folder_path
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
-                
+
                 logger.info(f"Álbum encontrado: {album['name']} - {album['artist_name']}")
                 logger.info(f"Folder path: {album.get('folder_path', 'No especificado')}")
                 logger.info(f"Modo de descarga: {self.download_manager.get_download_mode()}")
-                
+
                 # Información del usuario
                 user_info = {
                     'ip': request.remote_addr,
                     'user_agent': request.headers.get('User-Agent', ''),
                     'timestamp': time.time()
                 }
-                
+
                 # Crear ID único para la descarga
                 download_id = f"album_{album_id}_{int(time.time())}_{hash(request.remote_addr) % 10000}"
-                
+
                 # Registrar descarga
                 self.active_downloads[download_id] = {
                     'status': 'starting',
@@ -477,10 +477,10 @@ class APIEndpoints:
                     'user_ip': user_info['ip'],
                     'download_mode': self.download_manager.get_download_mode()
                 }
-                
+
                 logger.info(f"Descarga registrada con ID: {download_id}")
                 logger.info(f"Descargas activas: {list(self.active_downloads.keys())}")
-                
+
                 # Iniciar descarga en hilo separado según el modo
                 if self.download_manager.is_ssh_mode():
                     thread = threading.Thread(
@@ -494,9 +494,9 @@ class APIEndpoints:
                         args=(download_id, album, user_info),
                         daemon=True
                     )
-                
+
                 thread.start()
-                
+
                 return jsonify({
                     'download_id': download_id,
                     'status': 'started',
@@ -505,11 +505,11 @@ class APIEndpoints:
                     'artist_name': album.get('artist_name'),
                     'download_mode': self.download_manager.get_download_mode()
                 })
-                
+
             except Exception as e:
                 logger.error(f"Error iniciando descarga del álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/download/list')
         def api_list_downloads():
             """Listar todas las descargas activas (para debug)"""
@@ -525,7 +525,7 @@ class APIEndpoints:
                     'file_exists': os.path.exists(info.get('file_path', '')) if info.get('file_path') else False,
                     'file_size': os.path.getsize(info.get('file_path', '')) if info.get('file_path') and os.path.exists(info.get('file_path', '')) else 0
                 }
-            
+
             return jsonify({
                 'active_downloads': downloads_info,
                 'total': len(downloads_info),
@@ -537,56 +537,56 @@ class APIEndpoints:
 
 
 
-        
+
         @self.app.route('/api/download/file/<download_id>')
         def api_download_file(download_id):
             """Descargar archivo ZIP y programar borrado automático"""
             logger.info(f"Solicitud de descarga para ID: {download_id}")
-            
+
             if download_id not in self.active_downloads:
                 return jsonify({
                     'error': 'Descarga no encontrada',
                     'download_id': download_id
                 }), 404
-            
+
             download_info = self.active_downloads[download_id]
-            
+
             if download_info['status'] != 'completed':
                 return jsonify({
                     'error': f'Descarga no completada. Estado: {download_info["status"]}',
                     'status': download_info['status']
                 }), 400
-            
+
             file_path = download_info.get('file_path')
             zip_filename = download_info.get('zip_filename', 'album.zip')
-            
+
             if not file_path or not os.path.exists(file_path):
                 return jsonify({'error': 'Archivo no encontrado'}), 404
-            
+
             try:
                 # Marcar como descargado
                 download_info['downloaded_at'] = time.time()
                 download_info['download_count'] = download_info.get('download_count', 0) + 1
-                
+
                 # NUEVO: Programar borrado automático en 180 segundos
                 if not download_info.get('auto_delete_scheduled', False):
                     self._schedule_zip_deletion(download_id, delay_seconds=180)
                     logger.info(f"Programado borrado automático en 180 segundos para {download_id}")
-                
+
                 logger.info(f"Enviando archivo: {file_path} (borrado programado)")
-                
+
                 return send_file(
                     file_path,
                     as_attachment=True,
                     download_name=zip_filename,
                     mimetype='application/zip'
                 )
-                
+
             except Exception as e:
                 logger.error(f"Error enviando archivo: {e}")
                 return jsonify({'error': f'Error enviando archivo: {str(e)}'}), 500
 
-        
+
         # === HISTORIAL Y ESTADÍSTICAS ===
         @self.app.route('/api/recent/searches')
         def api_recent_searches():
@@ -595,13 +595,13 @@ class APIEndpoints:
             try:
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                    
+
                 searches = self.db_manager.get_recent_searches(limit)
                 return jsonify({'searches': searches})
             except Exception as e:
                 logger.error(f"Error obteniendo búsquedas recientes: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         # === IMÁGENES ===
         @self.app.route('/api/images/artist/<int:artist_id>')
         def api_get_artist_image(artist_id):
@@ -609,7 +609,7 @@ class APIEndpoints:
             try:
                 if not self.img_manager:
                     abort(404)
-                    
+
                 image_path = self.img_manager.get_artist_image(artist_id)
                 if image_path and os.path.exists(image_path):
                     return send_file(image_path)
@@ -619,14 +619,14 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo imagen del artista {artist_id}: {e}")
                 abort(404)
-        
+
         @self.app.route('/api/images/album/<int:album_id>')
         def api_get_album_image(album_id):
             """Obtener carátula de un álbum"""
             try:
                 if not self.img_manager:
                     abort(404)
-                    
+
                 image_path = self.img_manager.get_album_image(album_id)
                 if image_path and os.path.exists(image_path):
                     return send_file(image_path)
@@ -636,9 +636,9 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo imagen del álbum {album_id}: {e}")
                 abort(404)
-        
 
-        
+
+
         # === DIAGNÓSTICO ===
         @self.app.route('/api/debug/album/<int:album_id>')
         def api_debug_album(album_id):
@@ -647,11 +647,11 @@ class APIEndpoints:
                 album = self.db_manager.get_album_by_id(album_id)
                 if not album:
                     return jsonify({'error': 'Álbum no encontrado'}), 404
-                
+
                 music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
                 downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
                 folder_path = album.get('folder_path', '')
-                
+
                 debug_info = {
                     'album': album,
                     'music_root': music_root,
@@ -661,7 +661,7 @@ class APIEndpoints:
                     'downloads_dir_writable': os.access(downloads_dir, os.W_OK) if os.path.exists(downloads_dir) else False,
                     'folder_path_analysis': {}
                 }
-                
+
                 # Analizar folder_path
                 if folder_path:
                     # Determinar directorio del álbum
@@ -669,7 +669,7 @@ class APIEndpoints:
                         album_directory = folder_path
                     else:
                         album_directory = os.path.join(music_root, folder_path.lstrip('/'))
-                    
+
                     debug_info['folder_path_analysis'] = {
                         'raw_folder_path': folder_path,
                         'computed_directory': album_directory,
@@ -677,12 +677,12 @@ class APIEndpoints:
                         'is_directory': os.path.isdir(album_directory) if os.path.exists(album_directory) else False,
                         'music_files': []
                     }
-                    
+
                     # Buscar archivos de música
                     if os.path.exists(album_directory) and os.path.isdir(album_directory):
                         music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
                         music_files = []
-                        
+
                         try:
                             for root, dirs, files in os.walk(album_directory):
                                 for file in files:
@@ -696,38 +696,38 @@ class APIEndpoints:
                                             'relative_path': os.path.relpath(full_path, album_directory)
                                         }
                                         music_files.append(file_info)
-                            
+
                             debug_info['folder_path_analysis']['music_files'] = music_files[:10]  # Primeros 10
                             debug_info['folder_path_analysis']['total_music_files'] = len(music_files)
                             debug_info['folder_path_analysis']['total_size'] = sum(f['size'] for f in music_files)
-                            
+
                         except Exception as e:
                             debug_info['folder_path_analysis']['scan_error'] = str(e)
-                    
+
                 else:
                     # No hay folder_path, intentar construcción manual
                     artist_name = album.get('artist_name', '')
                     album_name = album.get('name', '')
-                    
+
                     if artist_name and album_name:
                         possible_paths = [
                             os.path.join(music_root, artist_name, album_name),
                             os.path.join(music_root, artist_name.replace(' ', '_'), album_name),
                             os.path.join(music_root, artist_name, album_name.replace(' ', '_')),
                         ]
-                        
+
                         debug_info['folder_path_analysis'] = {
                             'raw_folder_path': None,
                             'fallback_paths': []
                         }
-                        
+
                         for path in possible_paths:
                             path_info = {
                                 'path': path,
                                 'exists': os.path.exists(path),
                                 'is_directory': os.path.isdir(path) if os.path.exists(path) else False
                             }
-                            
+
                             if path_info['is_directory']:
                                 # Contar archivos de música
                                 music_count = 0
@@ -741,11 +741,11 @@ class APIEndpoints:
                                     path_info['music_files_count'] = music_count
                                 except:
                                     path_info['music_files_count'] = 0
-                            
+
                             debug_info['folder_path_analysis']['fallback_paths'].append(path_info)
-                
+
                 return jsonify(debug_info)
-                
+
             except Exception as e:
                 logger.error(f"Error en diagnóstico del álbum {album_id}: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -756,7 +756,7 @@ class APIEndpoints:
             """Debug de descargas activas - TEMPORAL"""
             downloads_debug = {}
             downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
-            
+
             # Información de directorio de descargas
             dir_info = {
                 'path': downloads_dir,
@@ -764,7 +764,7 @@ class APIEndpoints:
                 'writable': os.access(downloads_dir, os.W_OK) if os.path.exists(downloads_dir) else False,
                 'files': []
             }
-            
+
             if os.path.exists(downloads_dir):
                 try:
                     files = os.listdir(downloads_dir)
@@ -778,7 +778,7 @@ class APIEndpoints:
                             })
                 except Exception as e:
                     dir_info['error'] = str(e)
-            
+
             # Información de descargas activas
             for download_id, info in self.active_downloads.items():
                 downloads_debug[download_id] = {
@@ -795,7 +795,7 @@ class APIEndpoints:
                     'error': info.get('error', ''),
                     'time_running': time.time() - info.get('started_at', time.time())
                 }
-            
+
             return jsonify({
                 'downloads_directory': dir_info,
                 'active_downloads': downloads_debug,
@@ -813,13 +813,13 @@ class APIEndpoints:
         def api_extract_album(download_id):
             """Extraer álbum y borrar ZIP inmediatamente - VERSIÓN MÁS ROBUSTA"""
             logger.info(f"Solicitud de extracción para ID: {download_id}")
-            
+
             # DEBUG: Verificar qué descargas tenemos
             logger.info(f"Descargas activas disponibles: {list(self.active_downloads.keys())}")
-            
+
             # MEJORADA: Búsqueda más flexible
             actual_download_id = None
-            
+
             if download_id in self.active_downloads:
                 actual_download_id = download_id
                 logger.info(f"Encontrado download_id exacto: {download_id}")
@@ -829,7 +829,7 @@ class APIEndpoints:
                 for active_id in self.active_downloads.keys():
                     if download_id in active_id or active_id in download_id:
                         possible_matches.append(active_id)
-                
+
                 if possible_matches:
                     logger.info(f"Encontrados posibles matches: {possible_matches}")
                     actual_download_id = possible_matches[0]  # Usar el primero
@@ -838,11 +838,11 @@ class APIEndpoints:
                     # NUEVA: Búsqueda por timestamp (últimos 10 minutos) y estado completed
                     current_time = time.time()
                     recent_completed_downloads = []
-                    
+
                     for active_id, info in self.active_downloads.items():
                         started_at = info.get('started_at', 0)
                         status = info.get('status', '')
-                        
+
                         # Buscar descargas completadas en los últimos 10 minutos
                         if (current_time - started_at < 600 and status == 'completed'):
                             recent_completed_downloads.append({
@@ -853,10 +853,10 @@ class APIEndpoints:
                                 'age_seconds': current_time - started_at,
                                 'completed_at': info.get('completed_at', 0)
                             })
-                    
+
                     # Ordenar por más reciente
                     recent_completed_downloads.sort(key=lambda x: x['completed_at'], reverse=True)
-                    
+
                     return jsonify({
                         'error': 'Descarga no encontrada',
                         'download_id': download_id,
@@ -870,9 +870,9 @@ class APIEndpoints:
                             'completed_count': len([d for d in self.active_downloads.values() if d.get('status') == 'completed'])
                         }
                     }), 404
-            
+
             download_info = self.active_downloads[actual_download_id]
-            
+
             # Verificar estado - MEJORADO
             if download_info['status'] != 'completed':
                 return jsonify({
@@ -888,7 +888,7 @@ class APIEndpoints:
                     }.get(download_info['status'], 'Estado desconocido'),
                     'time_since_start': time.time() - download_info.get('started_at', time.time())
                 }), 400
-            
+
             try:
                 file_path = download_info.get('file_path')
                 if not file_path or not os.path.exists(file_path):
@@ -903,7 +903,7 @@ class APIEndpoints:
                             'file_size': download_info.get('file_size', 0)
                         }
                     }), 404
-                
+
                 # Verificar que es un ZIP válido antes de extraer
                 try:
                     with zipfile.ZipFile(file_path, 'r') as test_zip:
@@ -923,28 +923,28 @@ class APIEndpoints:
                         'error': f'Error verificando ZIP: {str(e)}',
                         'file_path': file_path
                     }), 400
-                
+
                 # Directorio de extracción
                 downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
-                
+
                 # Crear nombre del directorio de extracción más seguro
                 artist_name = download_info.get('artist_name', 'Unknown')
                 album_name = download_info.get('album_name', 'Unknown')
-                
+
                 # Limpiar nombres para sistema de archivos
                 safe_artist = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
                 safe_album = "".join(c for c in album_name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
-                
+
                 extract_dir_name = f"{safe_artist} - {safe_album}"
                 extract_path = os.path.join(downloads_dir, extract_dir_name)
-                
+
                 # Si el directorio ya existe, añadir sufijo numérico
                 counter = 1
                 original_extract_path = extract_path
                 while os.path.exists(extract_path):
                     extract_path = f"{original_extract_path} ({counter})"
                     counter += 1
-                
+
                 # Crear directorio si no existe
                 try:
                     os.makedirs(extract_path, exist_ok=True)
@@ -954,11 +954,11 @@ class APIEndpoints:
                         'error': f'Error creando directorio de extracción: {str(e)}',
                         'extract_path': extract_path
                     }), 403
-                
+
                 # Extraer ZIP
                 extracted_files = []
                 extraction_errors = []
-                
+
                 try:
                     with zipfile.ZipFile(file_path, 'r') as zip_ref:
                         for member in zip_ref.namelist():
@@ -967,27 +967,27 @@ class APIEndpoints:
                                 if member.startswith('/') or '..' in member:
                                     logger.warning(f"Saltando archivo con ruta insegura: {member}")
                                     continue
-                                
+
                                 # Verificar que el nombre del archivo es válido
                                 if not member or member.endswith('/'):
                                     continue  # Saltear directorios vacíos
-                                
+
                                 zip_ref.extract(member, extract_path)
                                 extracted_files.append(member)
                                 logger.debug(f"Extraído: {member}")
-                                
+
                             except Exception as e:
                                 error_msg = f"Error extrayendo {member}: {str(e)}"
                                 logger.warning(error_msg)
                                 extraction_errors.append(error_msg)
                                 continue
-                
+
                 except Exception as e:
                     return jsonify({
                         'error': f'Error durante extracción: {str(e)}',
                         'extract_path': extract_path
                     }), 500
-                
+
                 if not extracted_files:
                     # Limpiar directorio vacío
                     try:
@@ -998,9 +998,9 @@ class APIEndpoints:
                         'error': 'No se pudieron extraer archivos del ZIP',
                         'extraction_errors': extraction_errors
                     }), 400
-                
+
                 logger.info(f"Extraídos {len(extracted_files)} archivos a {extract_path}")
-                
+
                 # Verificar que se extrajeron archivos realmente
                 actual_files = []
                 total_size = 0
@@ -1015,9 +1015,9 @@ class APIEndpoints:
                                 pass
                 except Exception as e:
                     logger.warning(f"Error verificando archivos extraídos: {e}")
-                
+
                 logger.info(f"Archivos verificados en disco: {len(actual_files)}")
-                
+
                 # Borrar ZIP inmediatamente
                 zip_deleted = False
                 zip_delete_error = None
@@ -1030,12 +1030,12 @@ class APIEndpoints:
                     logger.warning(error_msg)
                     zip_delete_error = error_msg
                     zip_deleted = False
-                
+
                 # Cancelar borrado programado si existe
                 if actual_download_id in self.scheduled_deletions:
                     del self.scheduled_deletions[actual_download_id]
                     logger.info(f"Cancelado borrado automático programado para {actual_download_id}")
-                
+
                 # Actualizar estado de forma robusta
                 try:
                     if actual_download_id in self.active_downloads:
@@ -1055,7 +1055,7 @@ class APIEndpoints:
                         logger.warning(f"Download ID {actual_download_id} no encontrado para actualizar estado de extracción")
                 except Exception as e:
                     logger.error(f"Error actualizando estado de extracción: {e}")
-                
+
                 # Notificar extracción
                 try:
                     self.telegram_notifier.notify_album_extracted(
@@ -1066,7 +1066,7 @@ class APIEndpoints:
                     )
                 except Exception as e:
                     logger.warning(f"Error notificando extracción: {e}")
-                
+
                 return jsonify({
                     'success': True,
                     'message': 'Álbum extraído correctamente',
@@ -1086,7 +1086,7 @@ class APIEndpoints:
                         'total_size_mb': round(total_size / (1024*1024), 2) if total_size > 0 else 0
                     }
                 })
-                
+
             except zipfile.BadZipFile:
                 return jsonify({
                     'error': 'Archivo ZIP corrupto',
@@ -1111,14 +1111,14 @@ class APIEndpoints:
             if download_id in self.scheduled_deletions:
                 deletion_info = self.scheduled_deletions[download_id]
                 del self.scheduled_deletions[download_id]
-                
+
                 # Actualizar info de descarga
                 if download_id in self.active_downloads:
                     self.active_downloads[download_id]['auto_delete_scheduled'] = False
                     self.active_downloads[download_id]['auto_delete_cancelled_at'] = time.time()
-                
+
                 logger.info(f"Cancelado borrado automático para {download_id}")
-                
+
                 return jsonify({
                     'success': True,
                     'message': 'Borrado automático cancelado',
@@ -1136,7 +1136,7 @@ class APIEndpoints:
             """Listar borrados programados (debug)"""
             deletions_info = {}
             current_time = time.time()
-            
+
             for download_id, deletion_info in self.scheduled_deletions.items():
                 deletions_info[download_id] = {
                     'file_path': deletion_info['file_path'],
@@ -1147,13 +1147,13 @@ class APIEndpoints:
                     'delay_seconds': deletion_info.get('delay_seconds'),
                     'file_exists': os.path.exists(deletion_info['file_path'])
                 }
-            
+
             return jsonify({
                 'scheduled_deletions': deletions_info,
                 'total': len(deletions_info),
                 'current_time': current_time
             })
-    
+
 
         @self.app.route('/api/debug/download/<download_id>')
         def api_debug_download(download_id):
@@ -1164,10 +1164,10 @@ class APIEndpoints:
                 'exists_in_scheduled': download_id in self.scheduled_deletions,
                 'current_time': time.time()
             }
-            
+
             if download_id in self.active_downloads:
                 download_info = self.active_downloads[download_id].copy()
-                
+
                 # Añadir información de archivo
                 file_path = download_info.get('file_path')
                 if file_path:
@@ -1177,13 +1177,13 @@ class APIEndpoints:
                         'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
                         'readable': os.access(file_path, os.R_OK) if os.path.exists(file_path) else False
                     }
-                
+
                 debug_info['download_info'] = download_info
-            
+
             if download_id in self.scheduled_deletions:
                 debug_info['scheduled_deletion'] = self.scheduled_deletions[download_id].copy()
                 debug_info['scheduled_deletion']['time_remaining'] = self.scheduled_deletions[download_id]['delete_at'] - time.time()
-            
+
             return jsonify(debug_info)
 
 
@@ -1193,10 +1193,10 @@ class APIEndpoints:
             """Obtener estado de descarga con información detallada - VERSION MEJORADA"""
             logger.debug(f"Consulta estado para: {download_id}")
             logger.debug(f"Descargas activas: {list(self.active_downloads.keys())}")
-            
+
             # NUEVO: Búsqueda más flexible para manejar race conditions
             actual_download_id = None
-            
+
             # Búsqueda exacta primero
             if download_id in self.active_downloads:
                 actual_download_id = download_id
@@ -1207,7 +1207,7 @@ class APIEndpoints:
                         actual_download_id = active_id
                         logger.info(f"Encontrado match alternativo: {download_id} -> {actual_download_id}")
                         break
-            
+
             if not actual_download_id:
                 # MEJORADO: Respuesta más informativa
                 return jsonify({
@@ -1221,10 +1221,10 @@ class APIEndpoints:
                         'total_active': len(self.active_downloads)
                     }
                 }), 404
-            
+
             # Usar el ID encontrado
             status = self.active_downloads[actual_download_id].copy()
-            
+
             # Añadir información de borrado automático si existe
             if actual_download_id in self.scheduled_deletions:
                 deletion_info = self.scheduled_deletions[actual_download_id]
@@ -1233,7 +1233,7 @@ class APIEndpoints:
                 status['auto_delete_time_remaining'] = max(0, deletion_info['delete_at'] - time.time())
             else:
                 status['auto_delete_scheduled'] = False
-            
+
             # NUEVO: Añadir validación de archivo para estados completados
             if status.get('status') == 'completed':
                 file_path = status.get('file_path')
@@ -1245,7 +1245,7 @@ class APIEndpoints:
                         logger.warning(f"Archivo completado no existe: {file_path}")
                 else:
                     status['file_exists'] = False
-            
+
             # Añadir información adicional para debug
             status['debug_info'] = {
                 'requested_download_id': download_id,
@@ -1253,9 +1253,9 @@ class APIEndpoints:
                 'time_running': time.time() - status.get('started_at', time.time()),
                 'keys_in_status': list(status.keys())
             }
-            
+
             logger.debug(f"Enviando estado: {status.get('status')} - {status.get('progress')}%")
-            
+
             return jsonify(status)
 
         @self.app.route('/api/test/endpoints')
@@ -1289,7 +1289,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo info del sistema: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         # === ESTADÍSTICAS ===
 
         # === ESTADÍSTICAS CORREGIDAS ===
@@ -1306,7 +1306,7 @@ class APIEndpoints:
                 # Fallback básico si stats_manager no está disponible
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                
+
                 try:
                     db_info = self.db_manager.get_database_info()
                     overview = {
@@ -1330,7 +1330,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo resumen de estadísticas: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/stats/database')
         def api_stats_database():
             """Información detallada de la base de datos"""
@@ -1342,7 +1342,283 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo info de base de datos: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
+        # === ENDPOINTS ESPECÍFICOS PARA ESTADÍSTICAS ===
+
+        @self.app.route('/api/stats/artists/list')
+        def api_stats_artists_list():
+            """Lista todos los artistas para el selector de estadísticas"""
+            try:
+                limit = min(int(request.args.get('limit', 5000)), 10000)
+                search = request.args.get('search', '').strip()
+
+                logger.info(f"Stats - Solicitando lista de artistas: limit={limit}, search='{search}'")
+
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible'}), 500
+
+                if search:
+                    query = """
+                        SELECT id, name
+                        FROM artists
+                        WHERE name IS NOT NULL
+                        AND name != ''
+                        AND name LIKE ?
+                        ORDER BY name
+                        LIMIT ?
+                    """
+                    params = (f"%{search}%", limit)
+                else:
+                    query = """
+                        SELECT id, name
+                        FROM artists
+                        WHERE name IS NOT NULL AND name != ''
+                        ORDER BY name
+                        LIMIT ?
+                    """
+                    params = (limit,)
+
+                rows = self.db_manager.execute_query(query, params)
+
+                if not rows:
+                    count_query = "SELECT COUNT(*) as total FROM artists WHERE name IS NOT NULL AND name != ''"
+                    count_result = self.db_manager.execute_query(count_query)
+                    total_count = count_result[0]['total'] if count_result else 0
+
+                    return jsonify({
+                        'artists': [],
+                        'total': 0,
+                        'debug': {'total_in_db': total_count, 'search_term': search}
+                    })
+
+                artists = [{'id': row['id'], 'name': row['name']} for row in rows]
+
+                return jsonify({
+                    'artists': artists,
+                    'total': len(artists),
+                    'debug': {'processed': len(artists)}
+                })
+
+            except Exception as e:
+                logger.error(f"Error obteniendo lista de artistas para stats: {e}")
+                return jsonify({'error': str(e), 'artists': []}), 500
+
+        @self.app.route('/api/stats/artists/search')
+        def api_stats_artists_search():
+            """Búsqueda de artistas para autocomplete en estadísticas"""
+            try:
+                query = request.args.get('q', '').strip()
+                limit = min(int(request.args.get('limit', 15)), 50)
+
+                if len(query) < 1:
+                    return jsonify({'results': []})
+
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
+
+                search_query = """
+                    SELECT id, name
+                    FROM artists
+                    WHERE name IS NOT NULL
+                    AND name != ''
+                    AND name LIKE ?
+                    ORDER BY
+                        CASE
+                            WHEN name LIKE ? THEN 1
+                            ELSE 2
+                        END,
+                        name
+                    LIMIT ?
+                """
+
+                search_pattern = f"%{query}%"
+                starts_pattern = f"{query}%"
+
+                rows = self.db_manager.execute_query(search_query, (search_pattern, starts_pattern, limit))
+                results = [{'id': row['id'], 'name': row['name']} for row in rows]
+
+                return jsonify({'results': results, 'total': len(results)})
+
+            except Exception as e:
+                logger.error(f"Error en búsqueda de artistas para stats: {e}")
+                return jsonify({'error': str(e), 'results': []}), 500
+
+        @self.app.route('/api/stats/albums/search')
+        def api_stats_albums_search():
+            """Búsqueda de álbumes para análisis detallado en estadísticas"""
+            try:
+                query = request.args.get('q', '').strip()
+                limit = min(int(request.args.get('limit', 15)), 50)
+
+                logger.info(f"Stats - Búsqueda de álbumes: query='{query}', limit={limit}")
+
+                if len(query) < 2:
+                    return jsonify({'error': 'Consulta muy corta', 'results': []})
+
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
+
+                search_query = """
+                    SELECT DISTINCT
+                        a.id,
+                        a.name,
+                        a.year,
+                        a.genre,
+                        a.label,
+                        ar.name as artist_name,
+                        (ar.name || ' - ' || a.name) as display_name
+                    FROM albums a
+                    LEFT JOIN artists ar ON a.artist_id = ar.id
+                    WHERE (
+                        a.name LIKE ? OR
+                        ar.name LIKE ? OR
+                        (ar.name || ' - ' || a.name) LIKE ?
+                    )
+                    AND a.name IS NOT NULL AND a.name != ''
+                    AND ar.name IS NOT NULL AND ar.name != ''
+                    ORDER BY
+                        CASE
+                            WHEN ar.name LIKE ? OR a.name LIKE ? THEN 1
+                            ELSE 2
+                        END,
+                        ar.name, a.year, a.name
+                    LIMIT ?
+                """
+
+                search_pattern = f"%{query}%"
+                starts_pattern = f"{query}%"
+
+                albums = self.db_manager.execute_query(search_query,
+                                                    (search_pattern, search_pattern, search_pattern,
+                                                    starts_pattern, starts_pattern, limit))
+
+                results = []
+                for album in albums:
+                    album_data = {
+                        'id': album['id'],
+                        'name': album['name'] or 'Sin nombre',
+                        'year': album['year'] or 'Desconocido',
+                        'genre': album['genre'] or 'Desconocido',
+                        'label': album['label'] or 'Desconocido',
+                        'artist_name': album['artist_name'] or 'Artista desconocido',
+                        'display_name': album['display_name'] or f"Album {album['id']}"
+                    }
+                    results.append(album_data)
+
+                return jsonify({
+                    'results': results,
+                    'total': len(results),
+                    'query': query
+                })
+
+            except Exception as e:
+                logger.error(f"Error buscando álbumes para stats: {e}")
+                return jsonify({'error': str(e), 'results': []}), 500
+
+        @self.app.route('/api/stats/artists/<int:artist_id>/analysis/<analysis_type>')
+        def api_stats_artist_analysis(artist_id, analysis_type):
+            """Endpoint para análisis detallado de artistas en estadísticas"""
+            try:
+                # Verificar que el artista existe
+                artist = self.db_manager.get_artist_by_id(artist_id)
+                if not artist:
+                    return jsonify({'error': 'Artista no encontrado'}), 404
+
+                # Crear análisis según el tipo
+                if analysis_type == 'tiempo':
+                    return jsonify(self._get_time_analysis_simple(artist_id))
+                elif analysis_type == 'conciertos':
+                    return jsonify(self._get_concerts_analysis_simple(artist_id))
+                elif analysis_type == 'generos':
+                    return jsonify(self._get_genres_analysis_simple(artist_id))
+                elif analysis_type == 'sellos':
+                    return jsonify(self._get_labels_analysis_simple(artist_id))
+                elif analysis_type == 'discografia':
+                    return jsonify(self._get_discography_analysis_simple(artist_id))
+                elif analysis_type == 'escuchas':
+                    return jsonify(self._get_listens_analysis_simple(artist_id))
+                elif analysis_type == 'colaboradores':
+                    return jsonify(self._get_collaborators_analysis_simple(artist_id))
+                elif analysis_type == 'feeds':
+                    return jsonify(self._get_feeds_analysis_simple(artist_id))
+                else:
+                    return jsonify({'error': f'Tipo de análisis no soportado: {analysis_type}'}), 400
+
+            except Exception as e:
+                logger.error(f"Error en análisis {analysis_type} para artista {artist_id}: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/stats/albums/<int:album_id>/analysis/<analysis_type>')
+        def api_stats_album_analysis(album_id, analysis_type):
+            """Endpoint para análisis detallado de álbumes en estadísticas"""
+            try:
+                # Verificar que el álbum existe
+                album = self.db_manager.get_album_by_id(album_id)
+                if not album:
+                    return jsonify({'error': 'Álbum no encontrado'}), 404
+
+                # Análisis básicos para álbumes
+                if analysis_type == 'tracks':
+                    return jsonify(self._get_album_tracks_analysis(album_id))
+                elif analysis_type == 'technical':
+                    return jsonify(self._get_album_technical_analysis(album_id))
+                elif analysis_type == 'listening':
+                    return jsonify(self._get_album_listening_analysis(album_id))
+                elif analysis_type == 'credits':
+                    return jsonify(self._get_album_credits_analysis(album_id))
+                else:
+                    return jsonify({'error': f'Tipo de análisis no soportado: {analysis_type}'}), 400
+
+            except Exception as e:
+                logger.error(f"Error en análisis {analysis_type} para álbum {album_id}: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/stats/debug/artists')
+        def api_stats_debug_artists():
+            """Debug específico para estadísticas de artistas"""
+            try:
+                debug_info = {}
+
+                # Contar total de artistas
+                total_query = "SELECT COUNT(*) as total FROM artists"
+                total_result = self.db_manager.execute_query(total_query)
+                total_artists = total_result[0]['total'] if total_result else 0
+
+                # Contar artistas con nombre válido
+                valid_name_query = "SELECT COUNT(*) as count FROM artists WHERE name IS NOT NULL AND name != ''"
+                valid_name_result = self.db_manager.execute_query(valid_name_query)
+                valid_name_count = valid_name_result[0]['count'] if valid_name_result else 0
+
+                # Primeros 10 artistas
+                sample_query = "SELECT id, name FROM artists WHERE name IS NOT NULL AND name != '' ORDER BY name LIMIT 10"
+                sample_artists = self.db_manager.execute_query(sample_query)
+
+                # Test de endpoints de stats
+                endpoints_test = {
+                    '/api/stats/artists/list': 'disponible',
+                    '/api/stats/artists/search': 'disponible',
+                    '/api/stats/albums/search': 'disponible'
+                }
+
+                debug_info = {
+                    'database_path': self.db_manager.db_path,
+                    'database_exists': os.path.exists(self.db_manager.db_path),
+                    'totals': {
+                        'total_artists': total_artists,
+                        'valid_name_artists': valid_name_count
+                    },
+                    'sample_artists': [dict(row) for row in sample_artists],
+                    'stats_endpoints': endpoints_test,
+                    'recommendation': 'Usa /api/stats/artists/search?q=test para probar la búsqueda'
+                }
+
+                return jsonify(debug_info)
+
+            except Exception as e:
+                logger.error(f"Error en debug de stats de artistas: {e}")
+                return jsonify({'error': str(e)}), 500
+
+
         @self.app.route('/api/stats/artists')
         def api_stats_artists():
             """Estadísticas de artistas"""
@@ -1354,7 +1630,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo estadísticas de artistas: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/stats/albums')
         def api_stats_albums():
             """Estadísticas de álbumes"""
@@ -1366,7 +1642,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo estadísticas de álbumes: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/stats/songs')
         def api_stats_songs():
             """Estadísticas de canciones"""
@@ -1378,7 +1654,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error obteniendo estadísticas de canciones: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/stats/missing-data')
         def api_stats_missing_data():
             """Análisis de datos faltantes"""
@@ -1390,7 +1666,7 @@ class APIEndpoints:
             except Exception as e:
                 logger.error(f"Error analizando datos faltantes: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
         @self.app.route('/api/stats/charts/<category>/<chart_type>')
         def api_stats_charts(category, chart_type):
             """Gráficos estadísticos específicos"""
@@ -1404,7 +1680,7 @@ class APIEndpoints:
                 return jsonify({'error': str(e)}), 500
 
 
-        
+
 
 
         @self.app.route('/api/images/reload-json', methods=['POST'])
@@ -1413,9 +1689,9 @@ class APIEndpoints:
             try:
                 if not self.img_manager:
                     return jsonify({'error': 'ImageManager no disponible'}), 500
-                
+
                 success = self.img_manager.reload_json_metadata()
-                
+
                 if success:
                     stats = self.img_manager.get_json_stats()
                     return jsonify({
@@ -1428,7 +1704,7 @@ class APIEndpoints:
                         'success': False,
                         'message': 'Metadatos JSON no están habilitados en la configuración'
                     })
-                    
+
             except Exception as e:
                 logger.error(f"Error recargando metadatos JSON: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1439,10 +1715,10 @@ class APIEndpoints:
             try:
                 if not self.img_manager:
                     return jsonify({'error': 'ImageManager no disponible'}), 500
-                
+
                 stats = self.img_manager.get_json_stats()
                 return jsonify(stats)
-                
+
             except Exception as e:
                 logger.error(f"Error obteniendo estadísticas JSON: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1453,10 +1729,10 @@ class APIEndpoints:
             try:
                 if not self.img_manager:
                     return jsonify({'error': 'ImageManager no disponible'}), 500
-                
+
                 stats = self.img_manager.get_cache_stats()
                 return jsonify(stats)
-                
+
             except Exception as e:
                 logger.error(f"Error obteniendo estadísticas del cache: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1467,10 +1743,10 @@ class APIEndpoints:
             try:
                 if not self.img_manager:
                     return jsonify({'error': 'ImageManager no disponible'}), 500
-                
+
                 category = request.json.get('category') if request.is_json else None
                 success = self.img_manager.clear_cache(category)
-                
+
                 if success:
                     return jsonify({
                         'success': True,
@@ -1482,7 +1758,7 @@ class APIEndpoints:
                         'success': False,
                         'message': 'No se pudo limpiar el cache'
                     })
-                    
+
             except Exception as e:
                 logger.error(f"Error limpiando cache de imágenes: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1491,15 +1767,15 @@ class APIEndpoints:
         def api_compress_and_download(download_id):
             """Comprimir álbum transferido por SSH y preparar descarga - NUEVO ENDPOINT"""
             logger.info(f"Solicitud de compresión para ID: {download_id}")
-            
+
             if download_id not in self.active_downloads:
                 return jsonify({
                     'error': 'Descarga no encontrada',
                     'download_id': download_id
                 }), 404
-            
+
             download_info = self.active_downloads[download_id]
-            
+
             # Verificar que la transferencia SSH esté completa
             if download_info.get('status') != 'ssh_ready_download':
                 return jsonify({
@@ -1507,7 +1783,7 @@ class APIEndpoints:
                     'status': download_info.get('status'),
                     'download_id': download_id
                 }), 400
-            
+
             # El archivo ya está listo, solo marcar como completado para descarga
             try:
                 download_info.update({
@@ -1515,9 +1791,9 @@ class APIEndpoints:
                     'ready_for_download': True,
                     'compressed_at': time.time()
                 })
-                
+
                 logger.info(f"Álbum SSH {download_id} listo para descarga")
-                
+
                 return jsonify({
                     'success': True,
                     'message': 'Álbum listo para descarga',
@@ -1528,7 +1804,7 @@ class APIEndpoints:
                     'album_name': download_info.get('album_name'),
                     'artist_name': download_info.get('artist_name')
                 })
-                
+
             except Exception as e:
                 logger.error(f"Error preparando descarga para {download_id}: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1559,20 +1835,20 @@ class APIEndpoints:
             try:
                 limit = min(int(request.args.get('limit', 5000)), 10000)  # Aumentar límite
                 search = request.args.get('search', '').strip()
-                
+
                 logger.info(f"Solicitando lista de artistas: limit={limit}, search='{search}'")
-                
+
                 if not self.db_manager:
                     return jsonify({'error': 'Base de datos no disponible'}), 500
-                
+
                 # Consulta base
                 if search:
                     # Si hay búsqueda, filtrar
                     query = """
                         SELECT id, name
-                        FROM artists 
-                        WHERE name IS NOT NULL 
-                        AND name != '' 
+                        FROM artists
+                        WHERE name IS NOT NULL
+                        AND name != ''
                         AND name LIKE ?
                         ORDER BY name
                         LIMIT ?
@@ -1582,28 +1858,28 @@ class APIEndpoints:
                     # Sin búsqueda, todos los artistas
                     query = """
                         SELECT id, name
-                        FROM artists 
+                        FROM artists
                         WHERE name IS NOT NULL AND name != ''
                         ORDER BY name
                         LIMIT ?
                     """
                     params = (limit,)
-                
+
                 logger.debug(f"Ejecutando consulta: {query}")
                 logger.debug(f"Parámetros: {params}")
-                
+
                 rows = self.db_manager.execute_query(query, params)
-                
+
                 logger.info(f"Encontrados {len(rows)} artistas en la consulta")
-                
+
                 if not rows:
                     # Diagnóstico si no hay resultados
                     count_query = "SELECT COUNT(*) as total FROM artists WHERE name IS NOT NULL AND name != ''"
                     count_result = self.db_manager.execute_query(count_query)
                     total_count = count_result[0]['total'] if count_result else 0
-                    
+
                     logger.warning(f"No se encontraron artistas. Total en BD: {total_count}")
-                    
+
                     return jsonify({
                         'artists': [],
                         'total': 0,
@@ -1613,7 +1889,7 @@ class APIEndpoints:
                             'limit': limit
                         }
                     })
-                
+
                 artists = []
                 for row in rows:
                     try:
@@ -1625,11 +1901,11 @@ class APIEndpoints:
                     except Exception as e:
                         logger.warning(f"Error procesando artista: {e}")
                         continue
-                
+
                 logger.info(f"Devolviendo {len(artists)} artistas procesados")
-                
+
                 return jsonify({
-                    'artists': artists, 
+                    'artists': artists,
                     'total': len(artists),
                     'debug': {
                         'raw_rows': len(rows),
@@ -1638,7 +1914,7 @@ class APIEndpoints:
                         'limit_used': limit
                     }
                 })
-                
+
             except Exception as e:
                 logger.error(f"Error obteniendo lista de artistas: {e}")
                 return jsonify({
@@ -1652,6 +1928,49 @@ class APIEndpoints:
                     }
                 }), 500
 
+        @self.app.route('/api/artists/search')
+        def api_search_artists_autocomplete():
+            """Búsqueda de artistas para autocomplete"""
+            try:
+                query = request.args.get('q', '').strip()
+                limit = min(int(request.args.get('limit', 15)), 50)
+
+                if len(query) < 1:
+                    return jsonify({'results': []})
+
+                if not self.db_manager:
+                    return jsonify({'error': 'Base de datos no disponible', 'results': []}), 500
+
+                search_query = """
+                    SELECT id, name
+                    FROM artists
+                    WHERE name IS NOT NULL
+                    AND name != ''
+                    AND name LIKE ?
+                    ORDER BY
+                        CASE
+                            WHEN name LIKE ? THEN 1  -- Empieza con el término
+                            ELSE 2                   -- Contiene el término
+                        END,
+                        name
+                    LIMIT ?
+                """
+
+                search_pattern = f"%{query}%"
+                starts_pattern = f"{query}%"
+
+                rows = self.db_manager.execute_query(search_query, (search_pattern, starts_pattern, limit))
+                results = [{'id': row['id'], 'name': row['name']} for row in rows]
+
+                return jsonify({'results': results, 'total': len(results)})
+
+            except Exception as e:
+                logger.error(f"Error en búsqueda de artistas: {e}")
+                return jsonify({'error': str(e), 'results': []}), 500
+
+
+
+
         @self.app.route('/api/artists/<int:artist_id>/analysis/<analysis_type>')
         def api_artist_analysis(artist_id, analysis_type):
             """Endpoint unificado para análisis de artistas"""
@@ -1660,7 +1979,7 @@ class APIEndpoints:
                 artist = self.db_manager.get_artist_by_id(artist_id)
                 if not artist:
                     return jsonify({'error': 'Artista no encontrado'}), 404
-                
+
                 # Crear análisis básico según el tipo
                 if analysis_type == 'tiempo':
                     return jsonify(self._get_time_analysis_simple(artist_id))
@@ -1680,7 +1999,7 @@ class APIEndpoints:
                     return jsonify(self._get_feeds_analysis_simple(artist_id))
                 else:
                     return jsonify({'error': f'Tipo de análisis no soportado: {analysis_type}'}), 400
-                    
+
             except Exception as e:
                 logger.error(f"Error en análisis {analysis_type} para artista {artist_id}: {e}")
                 return jsonify({'error': str(e)}), 500
@@ -1691,45 +2010,45 @@ class APIEndpoints:
             """Debug de artistas - investigar por qué no aparecen todos"""
             try:
                 debug_info = {}
-                
+
                 # 1. Contar total de artistas en la BD
                 total_query = "SELECT COUNT(*) as total FROM artists"
                 total_result = self.db_manager.execute_query(total_query)
                 total_artists = total_result[0]['total'] if total_result else 0
-                
+
                 # 2. Contar artistas con nombre válido
                 valid_name_query = "SELECT COUNT(*) as count FROM artists WHERE name IS NOT NULL AND name != ''"
                 valid_name_result = self.db_manager.execute_query(valid_name_query)
                 valid_name_count = valid_name_result[0]['count'] if valid_name_result else 0
-                
+
                 # 3. Primeros 10 artistas para verificar datos
                 sample_query = "SELECT id, name FROM artists WHERE name IS NOT NULL AND name != '' ORDER BY name LIMIT 10"
                 sample_artists = self.db_manager.execute_query(sample_query)
-                
+
                 # 4. Últimos 10 artistas
                 last_query = "SELECT id, name FROM artists WHERE name IS NOT NULL AND name != '' ORDER BY id DESC LIMIT 10"
                 last_artists = self.db_manager.execute_query(last_query)
-                
+
                 # 5. Artistas con álbumes
                 with_albums_query = """
-                    SELECT COUNT(DISTINCT a.id) as count 
-                    FROM artists a 
-                    JOIN albums al ON a.id = al.artist_id 
+                    SELECT COUNT(DISTINCT a.id) as count
+                    FROM artists a
+                    JOIN albums al ON a.id = al.artist_id
                     WHERE a.name IS NOT NULL AND a.name != ''
                 """
                 with_albums_result = self.db_manager.execute_query(with_albums_query)
                 with_albums_count = with_albums_result[0]['count'] if with_albums_result else 0
-                
+
                 # 6. Buscar un artista específico para test
                 test_search = "SELECT id, name FROM artists WHERE name LIKE '%a%' LIMIT 5"
                 test_results = self.db_manager.execute_query(test_search)
-                
+
                 # 7. Verificar endpoint /api/artists/list
                 try:
                     artists_list = []
                     list_query = """
                         SELECT id, name
-                        FROM artists 
+                        FROM artists
                         WHERE name IS NOT NULL AND name != ''
                         ORDER BY name
                         LIMIT 100
@@ -1738,7 +2057,7 @@ class APIEndpoints:
                     artists_list = [{'id': row['id'], 'name': row['name']} for row in list_results]
                 except Exception as e:
                     artists_list = f"Error: {str(e)}"
-                
+
                 debug_info = {
                     'database_path': self.db_manager.db_path,
                     'database_exists': os.path.exists(self.db_manager.db_path),
@@ -1758,9 +2077,9 @@ class APIEndpoints:
                         'first_5': artists_list[:5] if isinstance(artists_list, list) else artists_list
                     }
                 }
-                
+
                 return jsonify(debug_info)
-                
+
             except Exception as e:
                 logger.error(f"Error en debug de artistas: {e}")
                 return jsonify({'error': str(e), 'traceback': str(e)}), 500
@@ -1778,20 +2097,20 @@ class APIEndpoints:
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} no encontrado al iniciar worker")
                 return
-                
+
             download_info = self.active_downloads[download_id]
             download_info['status'] = 'processing'
             download_info['progress'] = 5
             download_info['current_track'] = 'Inicializando...'
-            
+
             album_name = album.get('name', '')
             artist_name = album.get('artist_name', '')
             album_id = album.get('id')
             folder_path = album.get('folder_path', '')
-            
+
             logger.info(f"Iniciando descarga: {artist_name} - {album_name} (ID: {album_id})")
             logger.info(f"Folder path del álbum: {folder_path}")
-            
+
             # Notificar inicio
             try:
                 self.telegram_notifier.notify_download_started(
@@ -1799,19 +2118,19 @@ class APIEndpoints:
                 )
             except Exception as e:
                 logger.warning(f"Error notificando inicio: {e}")
-            
+
             # Determinar directorio del álbum
             music_root = self.config.get('paths', {}).get('music_root', '/mnt/NFS/moode/moode')
             album_directory = None
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante inicialización")
                 return
-                
+
             self.active_downloads[download_id]['current_track'] = 'Localizando directorio del álbum...'
             self.active_downloads[download_id]['progress'] = 10
-            
+
             if folder_path:
                 # Opción 1: Usar folder_path de la tabla albums
                 if folder_path.startswith('/'):
@@ -1823,28 +2142,28 @@ class APIEndpoints:
                 safe_artist = artist_name.replace('/', '_').replace('\\', '_')
                 safe_album = album_name.replace('/', '_').replace('\\', '_')
                 album_directory = os.path.join(music_root, safe_artist, safe_album)
-            
+
             logger.info(f"Directorio del álbum: {album_directory}")
-            
+
             # Verificar que el directorio existe
             if not album_directory or not os.path.exists(album_directory):
                 raise Exception(f"Directorio del álbum no encontrado: {album_directory}")
-            
+
             if not os.path.isdir(album_directory):
                 raise Exception(f"La ruta no es un directorio: {album_directory}")
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante verificación de directorio")
                 return
-                
+
             self.active_downloads[download_id]['current_track'] = 'Escaneando archivos de música...'
             self.active_downloads[download_id]['progress'] = 15
-            
+
             # Buscar archivos de música en el directorio
             music_extensions = {'.mp3', '.flac', '.ogg', '.m4a', '.wav', '.wma', '.aac'}
             music_files = []
-            
+
             for root, dirs, files in os.walk(album_directory):
                 for file in files:
                     _, ext = os.path.splitext(file.lower())
@@ -1855,50 +2174,50 @@ class APIEndpoints:
                             'name': file,
                             'relative_path': os.path.relpath(full_path, album_directory)
                         })
-            
+
             if not music_files:
                 raise Exception(f"No se encontraron archivos de música en: {album_directory}")
-            
+
             # Ordenar archivos por nombre para mantener orden de pistas
             music_files.sort(key=lambda x: x['name'])
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante escaneo de archivos")
                 return
-                
+
             self.active_downloads[download_id]['total_tracks'] = len(music_files)
             self.active_downloads[download_id]['progress'] = 20
             self.active_downloads[download_id]['current_track'] = f'Encontrados {len(music_files)} archivos'
             logger.info(f"Encontrados {len(music_files)} archivos de música")
-            
+
             # Crear directorio de descargas
             downloads_dir = self.config.get('paths', {}).get('downloads', '/downloads')
             os.makedirs(downloads_dir, exist_ok=True)
-            
+
             if not os.access(downloads_dir, os.W_OK):
                 raise Exception(f"Sin permisos de escritura en: {downloads_dir}")
-            
+
             # Crear archivo ZIP
             safe_artist = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_album = "".join(c for c in album_name if c.isalnum() or c in (' ', '-', '_')).strip()
             timestamp = int(time.time())
             zip_filename = f"{safe_artist} - {safe_album} [{timestamp}].zip"
             zip_path = os.path.join(downloads_dir, zip_filename)
-            
+
             logger.info(f"Creando ZIP: {zip_path}")
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció antes de crear ZIP")
                 return
-                
+
             self.active_downloads[download_id]['current_track'] = 'Iniciando creación del ZIP...'
             self.active_downloads[download_id]['progress'] = 25
-            
+
             successful_files = 0
             failed_files = []
-            
+
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zipf:
                 for i, music_file in enumerate(music_files):
                     try:
@@ -1909,19 +2228,19 @@ class APIEndpoints:
                             if os.path.exists(zip_path):
                                 os.remove(zip_path)
                             return
-                        
+
                         # Actualizar progreso (25% a 90%) - MÁS GRANULAR
                         progress = 25 + int((i / len(music_files)) * 65)
                         self.active_downloads[download_id]['progress'] = progress
                         self.active_downloads[download_id]['processed_tracks'] = i + 1
                         self.active_downloads[download_id]['current_track'] = music_file['name']
-                        
+
                         # LOG PARA DEBUG
                         if i % 5 == 0 or i == len(music_files) - 1:  # Log cada 5 archivos
                             logger.info(f"Procesando {i+1}/{len(music_files)}: {music_file['name']} ({progress}%)")
-                        
+
                         file_path = music_file['path']
-                        
+
                         if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                             # Usar ruta relativa en el ZIP para mantener estructura
                             zip_name = music_file['relative_path']
@@ -1930,13 +2249,13 @@ class APIEndpoints:
                             logger.debug(f"Añadido: {zip_name}")
                         else:
                             failed_files.append(f"Archivo vacío o no existe: {music_file['name']}")
-                            
+
                     except Exception as e:
                         error_msg = f"Error con {music_file['name']}: {str(e)}"
                         logger.warning(error_msg)
                         failed_files.append(error_msg)
                         continue
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció al finalizar ZIP")
@@ -1944,24 +2263,24 @@ class APIEndpoints:
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
                 return
-                
+
             self.active_downloads[download_id]['current_track'] = 'Finalizando ZIP...'
             self.active_downloads[download_id]['progress'] = 95
-            
+
             if successful_files == 0:
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
                 raise Exception(f"No se pudieron procesar archivos de música. Errores: {failed_files[:3]}")
-            
+
             # Verificar ZIP creado
             if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
                 raise Exception("Error creando archivo ZIP")
-            
+
             zip_size = os.path.getsize(zip_path)
             logger.info(f"ZIP completado: {zip_path} ({zip_size} bytes, {successful_files} archivos)")
-            
+
             # SECCIÓN MEJORADA: Actualizar estado final de forma más robusta
             try:
                 # Asegurar que el download_id existe en active_downloads antes de actualizar
@@ -2006,9 +2325,9 @@ class APIEndpoints:
                     logger.info(f"Recreada entrada para descarga {download_id}")
             except Exception as e:
                 logger.error(f"Error actualizando estado final de descarga {download_id}: {e}")
-            
+
             logger.info(f"Descarga {download_id} completada exitosamente")
-            
+
             # Notificar finalización
             try:
                 self.telegram_notifier.notify_download_completed(
@@ -2016,10 +2335,10 @@ class APIEndpoints:
                 )
             except Exception as e:
                 logger.warning(f"Error notificando finalización: {e}")
-                
+
         except Exception as e:
             logger.error(f"Error en descarga {download_id}: {e}")
-            
+
             # SECCIÓN MEJORADA: Actualizar estado de error de forma más robusta
             try:
                 if download_id in self.active_downloads:
@@ -2047,7 +2366,7 @@ class APIEndpoints:
                     }
             except Exception as update_error:
                 logger.error(f"Error actualizando estado de error para {download_id}: {update_error}")
-            
+
             # Limpiar archivo parcial
             try:
                 if 'zip_path' in locals() and os.path.exists(zip_path):
@@ -2055,7 +2374,7 @@ class APIEndpoints:
                     logger.info(f"ZIP parcial eliminado: {zip_path}")
             except:
                 pass
-            
+
             # Notificar error
             try:
                 self.telegram_notifier.notify_download_error(
@@ -2068,33 +2387,33 @@ class APIEndpoints:
 
     def _find_track_file_improved(self, track, music_root):
             """Busca el archivo de una canción en el sistema de archivos - VERSION MEJORADA"""
-            
+
             # Obtener la ruta principal del campo file_path
             file_path = track.get('file_path', '').strip()
-            
+
             if not file_path:
                 logger.debug(f"No hay file_path para: {track.get('title', 'Sin título')}")
                 return None
-            
+
             # Limpiar la ruta
             if file_path.startswith('file://'):
                 file_path = file_path[7:]
-            
+
             # Probar diferentes formas de construir la ruta
             search_paths = []
-            
+
             # Ruta 1: Si es absoluta, usar directamente
             if file_path.startswith('/'):
                 search_paths.append(file_path)
-            
+
             # Ruta 2: Relativa desde music_root
             search_paths.append(os.path.join(music_root, file_path.lstrip('/')))
-            
+
             # Ruta 3: Si la ruta contiene el music_root duplicado, limpiar
             if music_root in file_path and not file_path.startswith(music_root):
                 clean_path = file_path.replace(music_root, '').lstrip('/')
                 search_paths.append(os.path.join(music_root, clean_path))
-            
+
             # Verificar cada ruta
             for search_path in search_paths:
                 if os.path.exists(search_path) and os.path.isfile(search_path):
@@ -2102,7 +2421,7 @@ class APIEndpoints:
                     return search_path
                 else:
                     logger.debug(f"Archivo no existe: {search_path}")
-            
+
             # Si no se encuentra, intentar búsqueda por patrón como último recurso
             return self._search_track_by_pattern_improved(track, music_root)
 
@@ -2113,17 +2432,17 @@ class APIEndpoints:
             artist = track.get('artist', '').strip()
             album = track.get('album', '').strip()
             title = track.get('title', '').strip()
-            
+
             if not all([artist, album, title]):
                 return None
-            
+
             # Buscar en directorio del artista/álbum
             possible_dirs = [
                 os.path.join(music_root, artist, album),
                 os.path.join(music_root, artist.replace(' ', '_'), album),
                 os.path.join(music_root, artist, album.replace(' ', '_')),
             ]
-            
+
             for base_dir in possible_dirs:
                 if os.path.exists(base_dir) and os.path.isdir(base_dir):
                     # Buscar archivos que contengan el título
@@ -2133,9 +2452,9 @@ class APIEndpoints:
                                 full_path = os.path.join(base_dir, filename)
                                 logger.debug(f"Encontrado por patrón: {full_path}")
                                 return full_path
-            
+
             return None
-            
+
         except Exception as e:
             logger.debug(f"Error en búsqueda por patrón: {e}")
             return None
@@ -2144,62 +2463,62 @@ class APIEndpoints:
 
     def _find_track_file(self, track, music_root):
         """Busca el archivo de una canción en el sistema de archivos"""
-        
+
         # Lista de posibles campos que contienen rutas
         path_fields = ['file_path', 'path', 'location', 'file', 'filename', 'url']
-        
+
         for field in path_fields:
             if field in track and track[field]:
                 file_path = track[field]
-                
+
                 # Normalizar la ruta
                 if file_path.startswith('file://'):
                     file_path = file_path[7:]  # Quitar 'file://'
-                
+
                 # Si es ruta absoluta, usar directamente
                 if file_path.startswith('/'):
                     full_path = file_path
                 else:
                     # Si es ruta relativa, combinar con music_root
                     full_path = os.path.join(music_root, file_path.lstrip('/'))
-                
+
                 # Verificar si el archivo existe
                 if os.path.exists(full_path):
                     logger.debug(f"Archivo encontrado en {field}: {full_path}")
                     return full_path
                 else:
                     logger.debug(f"Archivo no existe en {field}: {full_path}")
-        
+
         # Si no se encuentra por rutas directas, intentar búsqueda por patrones
         return self._search_track_by_pattern(track, music_root)
-    
+
     def _search_track_by_pattern(self, track, music_root):
         """Busca un archivo de canción por patrones en el nombre"""
-        
+
         try:
             artist = track.get('artist', '').strip()
             album = track.get('album', '').strip()
             title = track.get('title', '').strip()
             track_number = track.get('track_number')
-            
+
             if not all([artist, album, title]):
                 logger.debug("Información insuficiente para búsqueda por patrón")
                 return None
-            
+
             # Limpiar nombres para búsqueda
             clean_artist = "".join(c for c in artist if c.isalnum() or c in (' ', '-', '_')).strip()
             clean_album = "".join(c for c in album if c.isalnum() or c in (' ', '-', '_')).strip()
             clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-            
+
             # Patrones de búsqueda comunes
             search_patterns = [
                 os.path.join(music_root, clean_artist, clean_album),
                 os.path.join(music_root, artist, album),
                 os.path.join(music_root, "**", clean_album),  # Búsqueda recursiva
             ]
-            
+
             extensions = ['.mp3', '.flac', '.ogg', '.m4a', '.wav']
-            
+
             for pattern_dir in search_patterns:
                 if os.path.exists(pattern_dir):
                     # Buscar archivos en el directorio
@@ -2213,15 +2532,15 @@ class APIEndpoints:
                                 if clean_title.lower() in file.lower():
                                     logger.debug(f"Archivo encontrado por patrón: {file_path}")
                                     return file_path
-                                
+
                                 # Verificar por número de pista
                                 if track_number and str(track_number).zfill(2) in file:
                                     logger.debug(f"Archivo encontrado por número de pista: {file_path}")
                                     return file_path
-            
+
             logger.debug(f"No se encontró archivo para: {artist} - {title}")
             return None
-            
+
         except Exception as e:
             logger.warning(f"Error en búsqueda por patrón: {e}")
             return None
@@ -2234,18 +2553,18 @@ class APIEndpoints:
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} no encontrado al iniciar worker SSH")
                 return
-                
+
             download_info = self.active_downloads[download_id]
             download_info['status'] = 'ssh_preparing'
             download_info['progress'] = 5
             download_info['current_track'] = 'Preparando transferencia SSH...'
-            
+
             album_name = album.get('name', '')
             artist_name = album.get('artist_name', '')
             album_id = album.get('id')
-            
+
             logger.info(f"Iniciando descarga SSH: {artist_name} - {album_name} (ID: {album_id})")
-            
+
             # Notificar inicio
             try:
                 self.telegram_notifier.notify_download_started(
@@ -2253,31 +2572,31 @@ class APIEndpoints:
                 )
             except Exception as e:
                 logger.warning(f"Error notificando inicio SSH: {e}")
-            
+
             # CORREGIDO: Obtener ruta sin verificar existencia local
             source_path = self.download_manager.get_album_source_path(album)
             if not source_path:
                 raise Exception("No se pudo determinar la ruta del álbum")
-            
+
             # NUEVO: Detectar si es un subdirectorio de disco y usar el padre
             import re
             if re.search(r'/Disc \d+$', source_path):
                 parent_path = os.path.dirname(source_path)
                 logger.info(f"Detectado subdirectorio de disco '{os.path.basename(source_path)}', usando directorio padre: {parent_path}")
                 source_path = parent_path
-            
+
             logger.info(f"Ruta de origen SSH: {source_path}")
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante preparación SSH")
                 return
-            
+
             # FASE 1: Transferencia SSH con rsync
             self.active_downloads[download_id]['status'] = 'ssh_transferring'
             self.active_downloads[download_id]['progress'] = 10
             self.active_downloads[download_id]['current_track'] = 'Verificando archivos remotos...'
-            
+
             def progress_callback(line):
                 """Callback para monitorear progreso de operaciones SSH"""
                 if download_id in self.active_downloads:
@@ -2285,39 +2604,39 @@ class APIEndpoints:
                         filename = line.strip()
                         if filename:
                             self.active_downloads[download_id]['current_track'] = f'Procesando: {filename}'
-            
+
             # Ejecutar operación SSH
             ssh_result = self.download_manager.execute_ssh_transfer(
                 source_path, album, download_id, progress_callback
             )
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante transferencia SSH")
                 return
-            
+
             if not ssh_result['success']:
                 raise Exception(f"Error en transferencia SSH: {ssh_result['error']}")
-            
+
             remote_path = ssh_result['remote_path']
             logger.info(f"Transferencia SSH completada para {download_id}, archivos en: {remote_path}")
-            
+
             # FASE 2: Compresión remota y descarga
             self.active_downloads[download_id]['status'] = 'ssh_compressing'
             self.active_downloads[download_id]['progress'] = 65
             self.active_downloads[download_id]['current_track'] = 'Comprimiendo álbum en servidor remoto...'
             self.active_downloads[download_id]['remote_path'] = remote_path
-            
+
             # Comprimir y transferir
             compression_result = self.download_manager.compress_remote_album(
                 remote_path, album, download_id
             )
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante compresión")
                 return
-            
+
             if not compression_result['success']:
                 # Limpiar archivos remotos en caso de error
                 try:
@@ -2325,22 +2644,22 @@ class APIEndpoints:
                 except:
                     pass
                 raise Exception(f"Error en compresión remota: {compression_result['error']}")
-            
+
             # FASE 3: Finalización
             self.active_downloads[download_id]['status'] = 'ssh_cleaning'
             self.active_downloads[download_id]['progress'] = 90
             self.active_downloads[download_id]['current_track'] = 'Limpiando archivos temporales...'
-            
+
             # Limpiar archivos remotos
             cleanup_success = self.download_manager.cleanup_remote_files(remote_path)
             if not cleanup_success:
                 logger.warning(f"No se pudieron limpiar archivos remotos para {download_id}")
-            
+
             # Verificar que la descarga sigue existiendo
             if download_id not in self.active_downloads:
                 logger.error(f"Download ID {download_id} desapareció durante limpieza")
                 return
-            
+
             # Actualizar estado final
             self.active_downloads[download_id].update({
                 'status': 'ssh_ready_download',  # NUEVO ESTADO: listo para descargar
@@ -2357,21 +2676,21 @@ class APIEndpoints:
                 'remote_cleanup': cleanup_success,
                 'ssh_transfer_complete': True
             })
-            
+
             logger.info(f"Descarga SSH {download_id} completada - Lista para descarga")
-            
+
             # Notificar finalización de transferencia SSH
             try:
                 self.telegram_notifier.notify_download_completed(
-                    album_name, artist_name, ssh_result['files_copied'], 
+                    album_name, artist_name, ssh_result['files_copied'],
                     compression_result['file_path'], 'ssh'
                 )
             except Exception as e:
                 logger.warning(f"Error notificando finalización SSH: {e}")
-                
+
         except Exception as e:
             logger.error(f"Error en descarga SSH {download_id}: {e}")
-            
+
             # Actualizar estado de error
             try:
                 if download_id in self.active_downloads:
@@ -2402,14 +2721,14 @@ class APIEndpoints:
                     }
             except Exception as update_error:
                 logger.error(f"Error actualizando estado de error SSH para {download_id}: {update_error}")
-            
+
             # Intentar limpiar archivos remotos si existen
             try:
                 if 'remote_path' in locals():
                     self.download_manager.cleanup_remote_files(remote_path)
             except:
                 pass
-            
+
             # Notificar error
             try:
                 self.telegram_notifier.notify_download_error(
@@ -2426,50 +2745,50 @@ class APIEndpoints:
             # Obtener álbumes con años
             query = """
                 SELECT year, COUNT(*) as count
-                FROM albums 
+                FROM albums
                 WHERE artist_id = ? AND year IS NOT NULL AND year != ''
-                GROUP BY year 
+                GROUP BY year
                 ORDER BY year
             """
             albums_data = self.db_manager.execute_query(query, (artist_id,))
-            
+
             if not albums_data:
                 return {'error': 'No se encontraron datos temporales para este artista'}
-            
+
             # Procesar datos
             from collections import defaultdict
             decades_data = defaultdict(int)
             years_data = []
-            
+
             for row in albums_data:
                 try:
                     year = int(row['year'])
                     count = row['count']
-                    
+
                     # Décadas
                     decade = (year // 10) * 10
                     decades_data[f"{decade}s"] += count
-                    
+
                     # Años
                     years_data.append({'year': year, 'albums': count})
                 except:
                     continue
-            
+
             # Crear gráficos usando stats_manager
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             decades_chart_data = [{'decade': d, 'count': c} for d, c in decades_data.items()]
-            
+
             charts = {
                 'decades_pie': stats_manager.create_chart('pie', decades_chart_data, 'Distribución por Décadas', 'decade', 'count'),
                 'albums_timeline': stats_manager.create_chart('line', years_data, 'Álbumes por Año', 'year', 'albums')
             }
-            
+
             # Estadísticas
             years = [d['year'] for d in years_data]
             most_productive_decade = max(decades_data.items(), key=lambda x: x[1])[0] if decades_data else 'N/A'
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2479,7 +2798,7 @@ class APIEndpoints:
                     'most_productive_decade': most_productive_decade
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis temporal: {e}")
             return {'error': str(e)}
@@ -2490,32 +2809,32 @@ class APIEndpoints:
             # Conciertos por año
             concerts_query = """
                 SELECT substr(eventDate, 1, 4) as year, COUNT(*) as concerts
-                FROM artists_setlistfm 
+                FROM artists_setlistfm
                 WHERE artist_id = ? AND eventDate IS NOT NULL AND eventDate != ''
                 GROUP BY year
                 HAVING year IS NOT NULL AND year != ''
                 ORDER BY year
             """
             concerts_data = self.db_manager.execute_query(concerts_query, (artist_id,))
-            
+
             # Canciones más tocadas
             songs_query = """
                 SELECT sets
-                FROM artists_setlistfm 
+                FROM artists_setlistfm
                 WHERE artist_id = ? AND sets IS NOT NULL AND sets != ''
             """
             setlist_data = self.db_manager.execute_query(songs_query, (artist_id,))
-            
+
             if not concerts_data and not setlist_data:
                 return {'error': 'No se encontraron datos de conciertos para este artista'}
-            
+
             # Procesar datos
             from collections import Counter
             import json
-            
+
             concerts_by_year = []
             total_concerts = 0
-            
+
             for row in concerts_data:
                 try:
                     year = int(row['year'])
@@ -2525,17 +2844,17 @@ class APIEndpoints:
                         concerts_by_year.append({'year': year, 'concerts': count})
                 except (ValueError, TypeError):
                     continue
-            
+
             # Procesar canciones más tocadas
             song_counts = Counter()
             valid_setlists = 0
-            
+
             for row in setlist_data:
                 try:
                     if row['sets']:
                         sets_data = json.loads(row['sets'])
                         valid_setlists += 1
-                        
+
                         if isinstance(sets_data, list):
                             for set_data in sets_data:
                                 if isinstance(set_data, dict) and 'song' in set_data:
@@ -2550,52 +2869,52 @@ class APIEndpoints:
                                                 song_counts[song.strip()] += 1
                 except (json.JSONDecodeError, TypeError, KeyError):
                     continue
-            
+
             # Datos para gráficos
             top_songs = [{'song': song, 'plays': count} for song, count in song_counts.most_common(12)]
-            
+
             # Países visitados
             countries_query = """
                 SELECT DISTINCT country_name, COUNT(*) as concerts
-                FROM artists_setlistfm 
+                FROM artists_setlistfm
                 WHERE artist_id = ? AND country_name IS NOT NULL AND country_name != ''
                 GROUP BY country_name
                 ORDER BY concerts DESC
             """
             countries_data = self.db_manager.execute_query(countries_query, (artist_id,))
-            
+
             # Último concierto
             last_concert_query = """
                 SELECT eventDate, venue_name, city_name
-                FROM artists_setlistfm 
+                FROM artists_setlistfm
                 WHERE artist_id = ? AND eventDate IS NOT NULL AND eventDate != ''
                 ORDER BY eventDate DESC
                 LIMIT 1
             """
             last_concert = self.db_manager.execute_query(last_concert_query, (artist_id,))
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {}
-            
+
             # Timeline de conciertos (siempre intentar crear)
             if concerts_by_year:
-                charts['concerts_timeline'] = stats_manager.create_chart('line', concerts_by_year, 
+                charts['concerts_timeline'] = stats_manager.create_chart('line', concerts_by_year,
                                             'Conciertos por Año', 'year', 'concerts')
-            
+
             # Canciones más tocadas (solo si hay datos)
             if top_songs:
-                charts['most_played_songs'] = stats_manager.create_chart('bar', top_songs, 
+                charts['most_played_songs'] = stats_manager.create_chart('bar', top_songs,
                                             'Canciones Más Tocadas en Vivo', 'song', 'plays')
-            
+
             # Países visitados (si hay datos)
             if countries_data and len(countries_data) > 1:
-                countries_chart_data = [{'country': row['country_name'], 'concerts': row['concerts']} 
+                countries_chart_data = [{'country': row['country_name'], 'concerts': row['concerts']}
                                       for row in countries_data[:10]]
                 charts['countries_visited'] = stats_manager.create_chart('pie', countries_chart_data,
                                             'Países Visitados', 'country', 'concerts')
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2607,7 +2926,7 @@ class APIEndpoints:
                     'total_setlists': valid_setlists
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de conciertos: {e}")
             return {'error': str(e)}
@@ -2618,37 +2937,37 @@ class APIEndpoints:
             # Géneros de álbumes
             album_genres_query = """
                 SELECT genre, COUNT(*) as count
-                FROM albums 
+                FROM albums
                 WHERE artist_id = ? AND genre IS NOT NULL AND genre != ''
-                GROUP BY genre 
+                GROUP BY genre
                 ORDER BY count DESC
                 LIMIT 10
             """
             album_genres = self.db_manager.execute_query(album_genres_query, (artist_id,))
-            
+
             # Datos de Discogs
             discogs_query = """
                 SELECT genres, styles
-                FROM discogs_discography 
+                FROM discogs_discography
                 WHERE artist_id = ?
             """
             discogs_data = self.db_manager.execute_query(discogs_query, (artist_id,))
-            
+
             # Tags de Last.fm
             lastfm_query = """
                 SELECT tags
-                FROM artists 
+                FROM artists
                 WHERE id = ? AND tags IS NOT NULL AND tags != ''
             """
             lastfm_data = self.db_manager.execute_query(lastfm_query, (artist_id,))
-            
+
             from collections import Counter
             import json
-            
+
             # Procesar datos de Discogs
             discogs_genres = Counter()
             discogs_styles = Counter()
-            
+
             for row in discogs_data:
                 try:
                     if row['genres']:
@@ -2657,7 +2976,7 @@ class APIEndpoints:
                             discogs_genres[genre] += 1
                 except:
                     pass
-                
+
                 try:
                     if row['styles']:
                         styles = json.loads(row['styles'])
@@ -2665,7 +2984,7 @@ class APIEndpoints:
                             discogs_styles[style] += 1
                 except:
                     pass
-            
+
             # Procesar tags de Last.fm
             lastfm_tags = Counter()
             for row in lastfm_data:
@@ -2676,23 +2995,23 @@ class APIEndpoints:
                             lastfm_tags[tag] += 1
                 except:
                     pass
-            
+
             # Preparar datos
             album_genres_data = [{'genre': row['genre'], 'count': row['count']} for row in album_genres]
             discogs_genres_data = [{'genre': g, 'count': c} for g, c in discogs_genres.most_common(10)]
             discogs_styles_data = [{'style': s, 'count': c} for s, c in discogs_styles.most_common(10)]
             lastfm_tags_data = [{'tag': t, 'count': c} for t, c in lastfm_tags.most_common(10)]
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {
                 'album_genres': stats_manager.create_chart('pie', album_genres_data, 'Géneros de Álbumes', 'genre', 'count'),
                 'discogs_genres': stats_manager.create_chart('pie', discogs_genres_data, 'Géneros Discogs', 'genre', 'count'),
                 'discogs_styles': stats_manager.create_chart('pie', discogs_styles_data, 'Estilos Discogs', 'style', 'count'),
                 'lastfm_tags': stats_manager.create_chart('pie', lastfm_tags_data, 'Tags Last.fm', 'tag', 'count')
             }
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2702,7 +3021,7 @@ class APIEndpoints:
                     'total_lastfm_tags': len(lastfm_tags_data)
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de géneros: {e}")
             return {'error': str(e)}
@@ -2713,56 +3032,56 @@ class APIEndpoints:
             # Sellos por álbum
             labels_query = """
                 SELECT label, year, COUNT(*) as count
-                FROM albums 
+                FROM albums
                 WHERE artist_id = ? AND label IS NOT NULL AND label != ''
                 GROUP BY label, year
                 ORDER BY year, count DESC
             """
             labels_data = self.db_manager.execute_query(labels_query, (artist_id,))
-            
+
             if not labels_data:
                 return {'error': 'No se encontraron datos de sellos para este artista'}
-            
+
             from collections import Counter, defaultdict
-            
+
             labels_count = Counter()
             labels_by_year = defaultdict(lambda: defaultdict(int))
-            
+
             for row in labels_data:
                 label = row['label']
                 year = row['year']
                 count = row['count']
-                
+
                 labels_count[label] += count
-                
+
                 try:
                     year_int = int(year) if year else 0
                     if year_int > 1900:  # Filtrar años válidos
                         labels_by_year[year_int][label] += count
                 except:
                     pass
-            
+
             # Datos para gráfico circular
             labels_pie_data = [{'label': l, 'count': c} for l, c in labels_count.most_common(8)]
-            
+
             # Timeline acumulativo CORREGIDO
             if labels_by_year:
                 # Obtener los top 5 sellos para el timeline
                 top_labels = [item['label'] for item in labels_pie_data[:5]]
-                
+
                 # Crear datos para timeline
                 timeline_data = []
                 cumulative_totals = defaultdict(int)
-                
+
                 # Ordenar años
                 sorted_years = sorted(labels_by_year.keys())
-                
+
                 for year in sorted_years:
                     for label in top_labels:
                         # Sumar álbumes de este año
                         albums_this_year = labels_by_year[year].get(label, 0)
                         cumulative_totals[label] += albums_this_year
-                        
+
                         # Solo añadir puntos donde hay cambios o al final
                         if albums_this_year > 0 or year == sorted_years[-1]:
                             timeline_data.append({
@@ -2770,7 +3089,7 @@ class APIEndpoints:
                                 'label': label,
                                 'albums': cumulative_totals[label]
                             })
-                
+
                 # Si no hay suficientes datos para timeline, crear datos básicos
                 if not timeline_data:
                     for label, count in labels_count.most_common(5):
@@ -2781,21 +3100,21 @@ class APIEndpoints:
                         })
             else:
                 timeline_data = []
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {}
-            
+
             # Gráfico circular siempre
-            charts['labels_pie'] = stats_manager.create_chart('pie', labels_pie_data, 
+            charts['labels_pie'] = stats_manager.create_chart('pie', labels_pie_data,
                                         'Distribución por Sellos', 'label', 'count')
-            
+
             # Timeline solo si hay datos
             if timeline_data:
-                charts['labels_timeline'] = stats_manager.create_chart('line', timeline_data, 
+                charts['labels_timeline'] = stats_manager.create_chart('line', timeline_data,
                                             'Álbumes Acumulados por Sello', 'year', 'albums')
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2805,7 +3124,7 @@ class APIEndpoints:
                     'years_active': len(sorted_years) if 'sorted_years' in locals() else 0
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de sellos: {e}")
             return {'error': str(e)}
@@ -2816,21 +3135,21 @@ class APIEndpoints:
             # Datos de Discogs
             discogs_query = """
                 SELECT format, type, user_coll, user_wantlist, formats
-                FROM discogs_discography 
+                FROM discogs_discography
                 WHERE artist_id = ?
             """
             discogs_data = self.db_manager.execute_query(discogs_query, (artist_id,))
-            
+
             if not discogs_data:
                 return {'error': 'No se encontraron datos de discografía en Discogs para este artista'}
-            
+
             from collections import Counter
             import json
-            
+
             formats_count = Counter()
             types_count = Counter()
             collection_data = {'En colección': 0, 'No en colección': 0}
-            
+
             for row in discogs_data:
                 # Formatos
                 if row['format']:
@@ -2843,31 +3162,31 @@ class APIEndpoints:
                                 formats_count[fmt['name']] += 1
                     except:
                         pass
-                
+
                 # Tipos
                 if row['type']:
                     types_count[row['type']] += 1
-                
+
                 # Colección
                 if row['user_coll'] and int(row['user_coll']) > 0:
                     collection_data['En colección'] += 1
                 else:
                     collection_data['No en colección'] += 1
-            
+
             # Preparar datos
             formats_data = [{'format': f, 'count': c} for f, c in formats_count.most_common(10)]
             types_data = [{'type': t, 'count': c} for t, c in types_count.most_common(10)]
             collection_chart_data = [{'status': s, 'count': c} for s, c in collection_data.items()]
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {
                 'formats': stats_manager.create_chart('pie', formats_data, 'Distribución por Formato', 'format', 'count'),
                 'types': stats_manager.create_chart('pie', types_data, 'Tipos de Lanzamiento', 'type', 'count'),
                 'collection': stats_manager.create_chart('pie', collection_chart_data, 'En Colección', 'status', 'count')
             }
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2876,7 +3195,7 @@ class APIEndpoints:
                     'formats_count': len(formats_count)
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de discografía: {e}")
             return {'error': str(e)}
@@ -2887,43 +3206,43 @@ class APIEndpoints:
             # Escuchas de Last.fm
             lastfm_query = """
                 SELECT track_name, scrobble_date, COUNT(*) as plays
-                FROM scrobbles_paqueradejere 
+                FROM scrobbles_paqueradejere
                 WHERE artist_id = ?
                 GROUP BY track_name, DATE(scrobble_date)
                 ORDER BY scrobble_date
             """
             lastfm_data = self.db_manager.execute_query(lastfm_query, (artist_id,))
-            
+
             # Escuchas de ListenBrainz
             listenbrainz_query = """
                 SELECT track_name, listen_date, COUNT(*) as plays
-                FROM listens_guevifrito 
+                FROM listens_guevifrito
                 WHERE artist_id = ?
                 GROUP BY track_name, DATE(listen_date)
                 ORDER BY listen_date
             """
             listenbrainz_data = self.db_manager.execute_query(listenbrainz_query, (artist_id,))
-            
+
             if not lastfm_data and not listenbrainz_data:
                 return {'error': 'No se encontraron datos de escuchas para este artista'}
-            
+
             # Procesar datos - simplificado para evitar complejidad
             from collections import defaultdict
-            
+
             # Last.fm por canciones (top 10)
             lastfm_tracks = defaultdict(int)
             for row in lastfm_data:
                 lastfm_tracks[row['track_name']] += row['plays']
-            
+
             lastfm_tracks_data = [{'track': t, 'plays': p} for t, p in sorted(lastfm_tracks.items(), key=lambda x: x[1], reverse=True)[:10]]
-            
+
             # ListenBrainz por canciones (top 10)
             listenbrainz_tracks = defaultdict(int)
             for row in listenbrainz_data:
                 listenbrainz_tracks[row['track_name']] += row['plays']
-            
+
             listenbrainz_tracks_data = [{'track': t, 'plays': p} for t, p in sorted(listenbrainz_tracks.items(), key=lambda x: x[1], reverse=True)[:10]]
-            
+
             # Datos acumulativos por mes (simplificado)
             lastfm_monthly = defaultdict(int)
             for row in lastfm_data:
@@ -2932,9 +3251,9 @@ class APIEndpoints:
                     lastfm_monthly[month] += row['plays']
                 except:
                     pass
-            
+
             lastfm_cumulative_data = [{'month': m, 'plays': p} for m, p in sorted(lastfm_monthly.items())]
-            
+
             listenbrainz_monthly = defaultdict(int)
             for row in listenbrainz_data:
                 try:
@@ -2942,19 +3261,19 @@ class APIEndpoints:
                     listenbrainz_monthly[month] += row['plays']
                 except:
                     pass
-            
+
             listenbrainz_cumulative_data = [{'month': m, 'plays': p} for m, p in sorted(listenbrainz_monthly.items())]
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {
                 'lastfm_tracks': stats_manager.create_chart('bar', lastfm_tracks_data, 'Top Canciones Last.fm', 'track', 'plays'),
                 'lastfm_cumulative': stats_manager.create_chart('line', lastfm_cumulative_data, 'Escuchas Last.fm por Mes', 'month', 'plays'),
                 'listenbrainz_tracks': stats_manager.create_chart('bar', listenbrainz_tracks_data, 'Top Canciones ListenBrainz', 'track', 'plays'),
                 'listenbrainz_cumulative': stats_manager.create_chart('line', listenbrainz_cumulative_data, 'Escuchas ListenBrainz por Mes', 'month', 'plays')
             }
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -2964,7 +3283,7 @@ class APIEndpoints:
                     'top_listenbrainz_track': max(listenbrainz_tracks.items(), key=lambda x: x[1])[0] if listenbrainz_tracks else 'N/A'
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de escuchas: {e}")
             return {'error': str(e)}
@@ -2975,21 +3294,21 @@ class APIEndpoints:
             # Productores, ingenieros y colaboradores de los álbumes
             collaborators_query = """
                 SELECT producers, engineers, credits
-                FROM albums 
+                FROM albums
                 WHERE artist_id = ? AND (producers IS NOT NULL OR engineers IS NOT NULL OR credits IS NOT NULL)
             """
             collaborators_data = self.db_manager.execute_query(collaborators_query, (artist_id,))
-            
+
             if not collaborators_data:
                 return {'error': 'No se encontraron datos de colaboradores para este artista'}
-            
+
             from collections import Counter
             import json
-            
+
             producers = Counter()
             engineers = Counter()
             collaborators = Counter()
-            
+
             for row in collaborators_data:
                 # Productores
                 if row['producers']:
@@ -3021,7 +3340,7 @@ class APIEndpoints:
                         for prod in prods[:5]:
                             if prod:
                                 producers[prod] += 1
-                
+
                 # Ingenieros
                 if row['engineers']:
                     try:
@@ -3048,7 +3367,7 @@ class APIEndpoints:
                         for eng in engs[:5]:
                             if eng:
                                 engineers[eng] += 1
-                
+
                 # Colaboradores (de credits) - MEJORADO PARA JSON
                 if row['credits']:
                     try:
@@ -3084,29 +3403,29 @@ class APIEndpoints:
                         for cred in creds[:5]:
                             if cred:
                                 collaborators[cred] += 1
-            
+
             # Preparar datos para gráficos
             producers_data = [{'producer': p, 'count': c} for p, c in producers.most_common(10)]
             engineers_data = [{'engineer': e, 'count': c} for e, c in engineers.most_common(10)]
             collaborators_data = [{'collaborator': c, 'count': count} for c, count in collaborators.most_common(15)]
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {}
-            
+
             if producers_data:
-                charts['producers'] = stats_manager.create_chart('pie', producers_data, 
+                charts['producers'] = stats_manager.create_chart('pie', producers_data,
                                             'Productores Frecuentes', 'producer', 'count')
-            
+
             if engineers_data:
-                charts['engineers'] = stats_manager.create_chart('pie', engineers_data, 
+                charts['engineers'] = stats_manager.create_chart('pie', engineers_data,
                                             'Ingenieros Frecuentes', 'engineer', 'count')
-            
+
             if collaborators_data:
-                charts['collaborators'] = stats_manager.create_chart('bar', collaborators_data, 
+                charts['collaborators'] = stats_manager.create_chart('bar', collaborators_data,
                                             'Colaboradores Frecuentes', 'collaborator', 'count')
-            
+
             return {
                 'charts': charts,
                 'stats': {
@@ -3116,7 +3435,7 @@ class APIEndpoints:
                     'unique_collaborators': len(set(list(producers.keys()) + list(engineers.keys()) + list(collaborators.keys())))
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de colaboradores: {e}")
             return {'error': str(e)}
@@ -3134,16 +3453,16 @@ class APIEndpoints:
                 LIMIT 50
             """
             feeds_data = self.db_manager.execute_query(feeds_query, (artist_id,))
-            
+
             if not feeds_data:
                 return {'error': 'No se encontraron feeds para este artista'}
-            
+
             from collections import Counter, defaultdict
-            
+
             # Feeds por fuente
             sources = Counter()
             monthly_activity = defaultdict(int)
-            
+
             feeds_list = []
             for row in feeds_data:
                 feeds_list.append({
@@ -3152,28 +3471,28 @@ class APIEndpoints:
                     'post_url': row['post_url'],
                     'post_date': row['post_date']
                 })
-                
+
                 sources[row['feed_name']] += 1
-                
+
                 # Actividad mensual
                 try:
                     month = row['post_date'][:7] if row['post_date'] else 'Unknown'
                     monthly_activity[month] += 1
                 except:
                     pass
-            
+
             # Preparar datos para gráficos
             sources_data = [{'source': s, 'count': c} for s, c in sources.most_common(10)]
             activity_data = [{'month': m, 'count': c} for m, c in sorted(monthly_activity.items())]
-            
+
             from stats_manager import StatsManager
             stats_manager = StatsManager(self.db_manager.db_path, self.config)
-            
+
             charts = {
                 'feeds_sources': stats_manager.create_chart('pie', sources_data, 'Feeds por Publicación', 'source', 'count'),
                 'feeds_timeline': stats_manager.create_chart('line', activity_data, 'Actividad por Mes', 'month', 'count')
             }
-            
+
             return {
                 'charts': charts,
                 'feeds': feeds_list,
@@ -3183,8 +3502,137 @@ class APIEndpoints:
                     'most_active_source': sources.most_common(1)[0][0] if sources else 'N/A'
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error en análisis de feeds: {e}")
             return {'error': str(e)}
-            
+
+
+
+    # === FUNCIONES AUXILIARES PARA ANÁLISIS DE ÁLBUMES ===
+    def _get_album_tracks_analysis(self, album_id):
+        """Análisis de las canciones del álbum"""
+        try:
+            tracks_query = """
+                SELECT title, track_number, duration, file_size, bitrate
+                FROM songs
+                WHERE album_id = ?
+                ORDER BY track_number, title
+            """
+            tracks = self.db_manager.execute_query(tracks_query, (album_id,))
+
+            if not tracks:
+                return {'error': 'No se encontraron canciones para este álbum'}
+
+            # Estadísticas básicas
+            total_tracks = len(tracks)
+            total_duration = sum(track.get('duration', 0) or 0 for track in tracks)
+            avg_duration = total_duration / total_tracks if total_tracks > 0 else 0
+
+            # Análisis de bitrates
+            bitrates = [track.get('bitrate') for track in tracks if track.get('bitrate')]
+            avg_bitrate = sum(bitrates) / len(bitrates) if bitrates else 0
+
+            return {
+                'tracks': [dict(track) for track in tracks],
+                'stats': {
+                    'total_tracks': total_tracks,
+                    'total_duration_seconds': total_duration,
+                    'total_duration_minutes': round(total_duration / 60, 2),
+                    'average_track_duration': round(avg_duration, 2),
+                    'average_bitrate': round(avg_bitrate, 2) if avg_bitrate else 0
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en análisis de tracks: {e}")
+            return {'error': str(e)}
+
+    def _get_album_technical_analysis(self, album_id):
+        """Análisis técnico del álbum"""
+        try:
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+
+            # Información técnica básica
+            technical_info = {
+                'format': album.get('format', 'Desconocido'),
+                'year': album.get('year', 'Desconocido'),
+                'genre': album.get('genre', 'Desconocido'),
+                'label': album.get('label', 'Desconocido')
+            }
+
+            return {
+                'technical_info': technical_info,
+                'stats': {
+                    'has_year': bool(album.get('year')),
+                    'has_genre': bool(album.get('genre')),
+                    'has_label': bool(album.get('label'))
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en análisis técnico: {e}")
+            return {'error': str(e)}
+
+    def _get_album_listening_analysis(self, album_id):
+        """Análisis de escuchas del álbum"""
+        try:
+            # Buscar escuchas en Last.fm
+            lastfm_query = """
+                SELECT COUNT(*) as total_scrobbles
+                FROM scrobbles_paqueradejere s
+                JOIN songs sg ON s.track_name = sg.title
+                WHERE sg.album_id = ?
+            """
+            lastfm_result = self.db_manager.execute_query(lastfm_query, (album_id,))
+            lastfm_scrobbles = lastfm_result[0]['total_scrobbles'] if lastfm_result else 0
+
+            # Buscar escuchas en ListenBrainz
+            listenbrainz_query = """
+                SELECT COUNT(*) as total_listens
+                FROM listens_guevifrito l
+                JOIN songs sg ON l.track_name = sg.title
+                WHERE sg.album_id = ?
+            """
+            listenbrainz_result = self.db_manager.execute_query(listenbrainz_query, (album_id,))
+            listenbrainz_listens = listenbrainz_result[0]['total_listens'] if listenbrainz_result else 0
+
+            return {
+                'listening_stats': {
+                    'lastfm_scrobbles': lastfm_scrobbles,
+                    'listenbrainz_listens': listenbrainz_listens,
+                    'total_plays': lastfm_scrobbles + listenbrainz_listens
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en análisis de escuchas: {e}")
+            return {'error': str(e)}
+
+    def _get_album_credits_analysis(self, album_id):
+        """Análisis de créditos del álbum"""
+        try:
+            album = self.db_manager.get_album_by_id(album_id)
+            if not album:
+                return {'error': 'Álbum no encontrado'}
+
+            credits_info = {
+                'producers': album.get('producers', 'No especificado'),
+                'engineers': album.get('engineers', 'No especificado'),
+                'credits': album.get('credits', 'No especificado')
+            }
+
+            return {
+                'credits': credits_info,
+                'stats': {
+                    'has_producers': bool(album.get('producers')),
+                    'has_engineers': bool(album.get('engineers')),
+                    'has_credits': bool(album.get('credits'))
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error en análisis de créditos: {e}")
+            return {'error': str(e)}

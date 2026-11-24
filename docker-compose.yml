@@ -36,8 +36,8 @@ services:
       - TZ=Europe/Madrid
       - USER=1000
       # Configuración de Telegram
-      - TELEGRAM_BOT_TOKEN=5497935650:AAHZSY-Jw9OxQx2qwKcQtBH2D7ej9GyGaio
-      - TELEGRAM_CHAT_ID=905051261
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       # Habilitar/deshabilitar notificaciones
       - TELEGRAM_ENABLED=true
       # CONFIGURACIÓN PARA PERMISOS NFS
